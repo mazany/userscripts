@@ -27,11 +27,16 @@ On **All items**:
 - verify default wishlist items are red
 - verify custom lists are color-coded
 - verify unknown items, when present, render correctly
+- verify clickable badges behave correctly on product cards only
 
 Expected:
 - badges are attached to item cards
 - badge text is readable
 - colors are stable across reloads for already known lists
+- custom-list badges open the matching native wishlist detail page
+- `Shift+click` on a custom-list badge opens the detail page in a new tab
+- the default badge switches **All** to **Default wishlist**
+- unknown badges do not navigate anywhere
 
 ---
 

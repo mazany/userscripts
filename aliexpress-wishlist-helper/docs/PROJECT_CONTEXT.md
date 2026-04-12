@@ -20,7 +20,7 @@ Primary goals:
   - load more list metadata automatically
 - keep the script robust enough for real daily use on the AliExpress web UI
 
-Current uploaded baseline: **version 0.6.6**.
+Current uploaded baseline: **version 0.6.8**.
 
 ---
 
@@ -347,6 +347,10 @@ As of the latest working baseline:
 - `All visible` works
 - manual deselection works correctly
 - switching filters in edit mode behaves correctly
+- product-card badges are clickable:
+  - custom wishlist badges open the native `detail.html` wishlist page
+  - `Shift+click` opens that page in a new tab
+  - the default badge switches `All` to `Default wishlist`
 - move dialog rows are color-coded and compact
 - current list is highlighted in the move dialog
 - additional move dialog pages can be loaded automatically, including after closing and reopening the dialog
@@ -356,21 +360,7 @@ As of the latest working baseline:
 
 ## What we still want to do later
 
-## 1. Clickable badges
-
-Planned behavior:
-
-- on product list cards only *(not in the "move to"" dialog)*
-- custom wishlist badge:
-  - open wishlist detail page
-- default wishlist badge:
-  - if current filter is `All`, switch to `Default wishlist`
-
-This was agreed as the next logical UX improvement.
-
----
-
-## 2. CONFIG block expansion
+## 1. CONFIG block expansion
 
 The script already has a `CONFIG` block, but it can still be extended and cleaned up as the single place for tunables such as:
 
@@ -383,7 +373,7 @@ The script already has a `CONFIG` block, but it can still be extended and cleane
 
 ---
 
-## 3. Optional "Load wishlists' info" / warm-up action
+## 2. Optional "Load wishlists' info" / warm-up action
 
 Still desirable:
 
@@ -397,7 +387,7 @@ Even though auto-loading exists for the move dialog, a dedicated metadata action
 
 ---
 
-## 4. Better immediate UI update after moving items
+## 3. Better immediate UI update after moving items
 
 Still desirable, but not yet fully solved:
 
@@ -419,7 +409,7 @@ This was considered useful, but not yet implemented because it is more invasive.
 
 ---
 
-## 5. Possibly improve data completeness from other native flows
+## 4. Possibly improve data completeness from other native flows
 
 Potential future direction:
 
@@ -467,9 +457,9 @@ When making changes, avoid mixing these concerns.
 Recommended immediate next task:
 
 1. double check existing logic for **performance** *(too many hooks, duplicate hooks, big / out of date structures, ...)*
-2. implement **clickable badges**
-3. then improve **post-move immediate UI update**
-4. optionally add a manual **Load wishlists' info** action
+2. improve **post-move immediate UI update**
+3. optionally add a manual **Load wishlists' info** action
+4. consider using more native signed flows to enrich list metadata proactively
 
 That order should keep risk low while giving visible UX improvements.
 
@@ -479,4 +469,4 @@ That order should keep risk low while giving visible UX improvements.
 
 Current uploaded working script baseline:
 
-- `AliExpress Wishlist Helper (Default Wishlist Filter)-0.6.6.user.js`
+- `AliExpress Wishlist Helper (Default Wishlist Filter)-0.6.8.user.js`

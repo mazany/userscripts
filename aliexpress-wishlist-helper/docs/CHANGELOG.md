@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.6.8 - 2026-04-12
+
+- custom-list product badges now open the native `wish-manage/detail.html?wishGroupId=...` page instead of the filtered `index.html` view
+- added `detail.html` support so move-dialog enhancements can still run on native custom-list pages
+- improved badge tooltips to describe the action instead of exposing debug item/group IDs
+- added `Shift+click` on custom-list badges to open the destination in a new browser tab
+- prevented the All-items toolbar/filter layer from appearing on native detail pages
+
+## 0.6.7 - 2026-04-12
+
+- added clickable product-card badges in **All items**
+- custom wishlist badges now open the corresponding wishlist detail page
+- clicking the default wishlist badge from **All** now switches to the **Default wishlist** filter
+- added defensive comments around fragile edit-mode and move-dialog DOM assumptions
+- refreshed README, project context, and manual test checklist for the clickable-badge behavior
+
 ## 0.6.6 - 2026-04-12
 
 - fixed move-dialog auto-load so reopening the dialog continues loading additional pages instead of stopping after the first session

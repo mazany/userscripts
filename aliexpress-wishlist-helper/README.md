@@ -22,7 +22,7 @@ It makes the hidden/default wishlist manageable on the web UI by showing wishlis
 
 ## Current baseline
 
-Working baseline: **v0.6.6**
+Working baseline: **v0.6.8**
 
 ## Supported page
 
@@ -57,6 +57,9 @@ In **All items**, each loaded item gets a badge showing:
 - **Default wishlist** for `groupId = 0`
 - custom wishlist name when known
 - neutral fallback when mapping is not yet known
+- custom-list badges open the native custom-list detail page
+- the default badge switches to the **Default wishlist** filter when clicked from **All**
+- `Shift+click` on a custom-list badge opens the detail page in a new tab
 
 ### Filters
 
@@ -125,7 +128,6 @@ Keys currently used:
 
 ## Planned / future work
 
-- clickable badges
 - explicit **Load wishlists' info** action
 - better immediate UI refresh after moving items between lists
 - additional cleanup and documentation improvements

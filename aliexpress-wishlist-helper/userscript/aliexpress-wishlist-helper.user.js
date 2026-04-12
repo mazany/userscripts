@@ -1,14 +1,15 @@
 // ==UserScript==
 // @name         AliExpress Wishlist Helper (Default Wishlist Filter)
 // @namespace    https://userscripts.mazy.cc/
-// @version      0.6.6
-// @description  Adds wishlist badges, filters, edit-mode helpers, and move-dialog enhancements to AliExpress wishlist management.
+// @version      0.6.8
+// @description  Adds clickable wishlist badges, filters, edit-mode helpers, and move-dialog enhancements to AliExpress wishlist management.
 // @author       mazy
 // @homepageURL  https://github.com/mazany/userscripts/tree/main/aliexpress-wishlist-helper
 // @supportURL   https://github.com/mazany/userscripts/issues
 // @updateURL    https://raw.githubusercontent.com/mazany/userscripts/main/aliexpress-wishlist-helper/userscript/aliexpress-wishlist-helper.user.js
 // @downloadURL  https://raw.githubusercontent.com/mazany/userscripts/main/aliexpress-wishlist-helper/userscript/aliexpress-wishlist-helper.user.js
 // @match        https://www.aliexpress.com/p/wish-manage/index.html*
+// @match        https://www.aliexpress.com/p/wish-manage/detail.html*
 // @run-at       document-start
 // @grant        none
 // ==/UserScript==
@@ -209,6 +210,29 @@
         font-weight: 600;
         border: 1px solid transparent;
         max-width: min(360px, 80vw);
+      }
+
+      .ae-wh-badge--button {
+        appearance: none;
+        font: inherit;
+        text-align: left;
+        cursor: default;
+        opacity: 1;
+        user-select: none;
+        -webkit-user-select: none;
+      }
+
+      .ae-wh-badge--clickable {
+        cursor: pointer;
+      }
+
+      .ae-wh-badge--clickable:hover {
+        filter: brightness(.98);
+      }
+
+      .ae-wh-badge--clickable:focus-visible {
+        outline: 2px solid rgba(230, 0, 18, 0.24);
+        outline-offset: 2px;
       }
 
       .ae-wh-badge__dot {
@@ -554,6 +578,10 @@
     return getCardRoots().filter(root => isElementVisible(root));
   }
 
+  function isWishlistDetailPage() {
+    return /\/p\/wish-manage\/detail\.html$/i.test(location.pathname);
+  }
+
   function getCardCheckboxOverlay(cardRoot) {
     return cardRoot.querySelector(SELECTORS.checkboxOverlay);
   }
@@ -570,6 +598,8 @@
     const currentlyChecked = isCardChecked(cardRoot);
     if (currentlyChecked === shouldBeChecked) return false;
 
+    // The disabled-looking overlay is the most reliable native click target in edit mode.
+    // Clicking other checkbox descendants can miss the toggle or produce scroll jumps.
     const scrollX = window.scrollX;
     const scrollY = window.scrollY;
 
@@ -1369,6 +1399,7 @@
   }
 
   function shouldShowToolbar() {
+    if (isWishlistDetailPage()) return false;
     if (state.pageType === 'GROUP_LIST') return false;
     if (state.pageType === 'PRODUCT_LIST') return true;
     return isAllItemsTabActive();
@@ -1467,6 +1498,8 @@
     const titleRow = cardRoot.querySelector(SELECTORS.titleRow);
     if (!titleRow) return;
 
+    // Keep the badge anchored just below the title row because this survives card rerenders
+    // more consistently than deeper product-card subtrees with hashed class names.
     const parent = titleRow.parentElement || titleRow;
     let metaRow = parent.querySelector('.ae-wh-meta-row');
 
@@ -1478,29 +1511,29 @@
 
     let badge = metaRow.querySelector('.ae-wh-badge');
     if (!badge) {
-      badge = document.createElement('span');
-      badge.className = 'ae-wh-badge';
+      badge = document.createElement('button');
+      badge.type = 'button';
+      badge.className = 'ae-wh-badge ae-wh-badge--button';
       badge.innerHTML = `
         <span class="ae-wh-badge__dot"></span>
         <span class="ae-wh-badge__text"></span>
       `;
+      badge.addEventListener('click', onProductBadgeClick);
       metaRow.appendChild(badge);
     }
 
     let label = 'Unknown';
     let palette = unknownPalette();
+    let groupId = '';
 
     if (record) {
-      const groupId = record.g;
+      groupId = record.g;
       const group = state.groups[groupId];
       label = groupId === DEFAULT_GROUP_ID
         ? 'Default wishlist'
         : (group?.name || `List ${groupId}`);
 
       palette = paletteForGroup(groupId);
-      badge.title = `itemId=${itemId}, groupId=${groupId}`;
-    } else {
-      badge.title = `itemId=${itemId}, groupId=unknown`;
     }
 
     badge.querySelector('.ae-wh-badge__text').textContent = label;
@@ -1508,10 +1541,81 @@
     badge.style.borderColor = palette.border;
     badge.style.color = palette.color;
     badge.querySelector('.ae-wh-badge__dot').style.backgroundColor = palette.dot;
+
+    const clickable =
+      !!record &&
+      (groupId !== DEFAULT_GROUP_ID || state.filter === FILTERS.ALL);
+
+    badge.dataset.aeWhGroupId = groupId;
+    badge.disabled = !clickable;
+    badge.classList.toggle('ae-wh-badge--clickable', clickable);
+
+    if (clickable && groupId !== DEFAULT_GROUP_ID) {
+      badge.title = `Open wishlist "${label}"\nCtrl+click to open in a new tab\nShift+click to open in a new window`;
+      badge.setAttribute('aria-label', `Open wishlist ${label}`);
+    } else if (clickable) {
+      badge.title = 'Show only Default wishlist items';
+      badge.setAttribute('aria-label', 'Filter to Default wishlist');
+    } else {
+      badge.removeAttribute('title');
+      badge.removeAttribute('aria-label');
+    }
   }
 
   function removeBadge(cardRoot) {
     cardRoot.querySelectorAll('.ae-wh-meta-row').forEach(el => el.remove());
+  }
+
+  function onProductBadgeClick(event) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const badge = event.currentTarget;
+    if (!(badge instanceof HTMLButtonElement) || badge.disabled) return;
+
+    const groupId = badge.dataset.aeWhGroupId || '';
+    if (!groupId) return;
+
+    if (groupId === DEFAULT_GROUP_ID) {
+      if (state.filter === FILTERS.ALL) {
+        setFilter(FILTERS.DEFAULT);
+      }
+      return;
+    }
+
+    const url = buildWishlistGroupUrl(groupId);
+    if (event.ctrlKey || event.metaKey) {
+      openUrlInNewTab(url);
+      return;
+    }
+
+    if (event.shiftKey) {
+      openUrlInNewWindow(url);
+      return;
+    }
+
+    location.assign(url);
+  }
+
+  function openUrlInNewTab(url) {
+    const link = document.createElement('a');
+    link.href = url;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  }
+
+  function openUrlInNewWindow(url) {
+    window.open(url, '_blank', 'noopener,noreferrer');
+  }
+
+  function buildWishlistGroupUrl(groupId) {
+    const url = new URL('/p/wish-manage/detail.html', location.origin);
+    url.searchParams.set('wishGroupId', String(groupId));
+    return url.toString();
   }
 
   function applyFilter(cardRoot, record) {
@@ -1682,6 +1786,8 @@
 
         const groupId = findGroupIdByName(name);
 
+        // The name/count container is the most stable insertion point we have found for dialog
+        // row augmentation across rerenders and pagination updates.
         const sideEl = nameEl.parentElement || row;
         let compactEl = sideEl.querySelector('.ae-wh-modal-compact');
         if (!compactEl) {
