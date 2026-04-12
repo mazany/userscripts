@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.15 - 2026-04-13
+
+- centralized wishlist page-mode detection into a single helper so toolbar visibility no longer depends on scattered pathname, pageType, and tab-text checks
+
 ## 0.6.14 - 2026-04-13
 
 - skipped expensive move-dialog context tracking on helper-toolbar, "All visible", native footer "All", card checkbox, and card menu-button clicks that cannot open the dialog directly

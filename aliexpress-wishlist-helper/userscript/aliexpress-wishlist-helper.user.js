@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AliExpress Wishlist Helper (Default Wishlist Filter)
 // @namespace    https://userscripts.mazy.cc/
-// @version      0.6.14
+// @version      0.6.15
 // @description  Adds clickable wishlist badges, filters, edit-mode helpers, and move-dialog enhancements to AliExpress wishlist management.
 // @author       mazy
 // @homepageURL  https://github.com/mazany/userscripts/tree/main/aliexpress-wishlist-helper
@@ -598,6 +598,13 @@
 
   function isWishlistDetailPage() {
     return /\/p\/wish-manage\/detail\.html$/i.test(location.pathname);
+  }
+
+  function getWishlistViewMode() {
+    if (isWishlistDetailPage()) return 'detail';
+    if (state.pageType === 'GROUP_LIST') return 'group-list';
+    if (state.pageType === 'PRODUCT_LIST') return 'all-items';
+    return isAllItemsTabActive() ? 'all-items' : 'group-list';
   }
 
   function getCardCheckboxOverlay(cardRoot) {
@@ -1601,10 +1608,7 @@
   }
 
   function shouldShowToolbar() {
-    if (isWishlistDetailPage()) return false;
-    if (state.pageType === 'GROUP_LIST') return false;
-    if (state.pageType === 'PRODUCT_LIST') return true;
-    return isAllItemsTabActive();
+    return getWishlistViewMode() === 'all-items';
   }
 
   function isAllItemsTabActive() {
