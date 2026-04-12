@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.11 - 2026-04-12
+
+- stopped move-dialog processing when the modal is hidden or otherwise not visibly open
+- kept the modal observer attach timing safe for the dialog's staged render so first-open behavior still works
+- added row-level signatures in move-dialog annotation to skip unchanged rows on repeated modal mutations
+- replaced repeated move-dialog metadata `innerHTML` rewrites with in-place node updates for privacy/count metadata
+
 ## 0.6.10 - 2026-04-12
 
 - changed the refresh scheduler so observer-driven updates can reprocess only affected card roots instead of rescanning every card

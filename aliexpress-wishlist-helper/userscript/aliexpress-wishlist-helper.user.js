@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AliExpress Wishlist Helper (Default Wishlist Filter)
 // @namespace    https://userscripts.mazy.cc/
-// @version      0.6.10
+// @version      0.6.11
 // @description  Adds clickable wishlist badges, filters, edit-mode helpers, and move-dialog enhancements to AliExpress wishlist management.
 // @author       mazy
 // @homepageURL  https://github.com/mazany/userscripts/tree/main/aliexpress-wishlist-helper
@@ -1357,10 +1357,7 @@
   function attachMoveDialogObserver(modal) {
     if (state.modalObserver && state.modalObserver.__aeWhModal === modal) return;
 
-    if (state.modalObserver) {
-      state.modalObserver.disconnect();
-      state.modalObserver = null;
-    }
+    detachMoveDialogObserver();
 
     state.moveDialogAutoLoadDone = false;
 
@@ -1383,10 +1380,7 @@
     state.modalObserver = observer;
   }
 
-  function detachMoveDialogObserverIfNeeded() {
-    const modal = document.querySelector(SELECTORS.modal);
-    if (modal) return;
-
+  function detachMoveDialogObserver() {
     if (state.modalObserver) {
       state.modalObserver.disconnect();
       state.modalObserver = null;
@@ -1396,6 +1390,32 @@
     state.moveDialogAutoLoadQueued = false;
     state.moveDialogAutoLoadDone = false;
     state.moveDialogLastRowCount = 0;
+  }
+
+  function detachMoveDialogObserverIfNeeded() {
+    const modal = document.querySelector(SELECTORS.modal);
+    if (modal && isMoveDialogVisible(modal)) return;
+    detachMoveDialogObserver();
+  }
+
+  function isMoveDialogVisible(modal = null) {
+    const root = modal || document.querySelector(SELECTORS.modal);
+    if (!root || !document.contains(root)) return false;
+
+    const style = window.getComputedStyle(root);
+    if (style.display === 'none' || style.visibility === 'hidden' || style.pointerEvents === 'none') {
+      return false;
+    }
+
+    return root.getClientRects().length > 0;
+  }
+
+  function isMoveDialogTitleMatch(modal = null) {
+    const root = modal || document.querySelector(SELECTORS.modal);
+    if (!root) return false;
+
+    const title = root.querySelector(SELECTORS.modalTitle)?.textContent?.trim() || '';
+    return /move to another list/i.test(title);
   }
 
   function getMoveDialogScrollEl(modal = null) {
@@ -1424,10 +1444,7 @@
     if (state.moveDialogAutoLoadRunning || state.moveDialogAutoLoadQueued || state.moveDialogAutoLoadDone) return;
 
     const modal = document.querySelector(SELECTORS.modal);
-    if (!modal) return;
-
-    const title = modal.querySelector(SELECTORS.modalTitle)?.textContent?.trim() || '';
-    if (!/move to another list/i.test(title)) return;
+    if (!isMoveDialogVisible(modal) || !isMoveDialogTitleMatch(modal)) return;
 
     state.moveDialogAutoLoadDone = true;
     state.moveDialogAutoLoadQueued = true;
@@ -1445,10 +1462,7 @@
     if (state.moveDialogAutoLoadRunning) return false;
 
     const modal = document.querySelector(SELECTORS.modal);
-    if (!modal) return false;
-
-    const title = modal.querySelector(SELECTORS.modalTitle)?.textContent?.trim() || '';
-    if (!/move to another list/i.test(title)) return false;
+    if (!isMoveDialogVisible(modal) || !isMoveDialogTitleMatch(modal)) return false;
 
     const scrollEl = getMoveDialogScrollEl(modal);
     const initialScrollTop = scrollEl ? scrollEl.scrollTop : 0;
@@ -1929,8 +1943,8 @@
 
   function annotateMoveDialog() {
     const modal = document.querySelector(SELECTORS.modal);
-    if (!modal) {
-      detachMoveDialogObserverIfNeeded();
+    if (!isMoveDialogVisible(modal)) {
+      detachMoveDialogObserver();
       return;
     }
 
@@ -1946,8 +1960,7 @@
       modal.classList.remove('ae-wh-compact-move-dialog');
     }
 
-    const title = modal.querySelector(SELECTORS.modalTitle)?.textContent?.trim() || '';
-    if (!/move to another list/i.test(title)) return;
+    if (!isMoveDialogTitleMatch(modal)) return;
 
     const rows = Array.from(modal.querySelectorAll(SELECTORS.modalListItem))
     .filter(row => !row.querySelector(SELECTORS.modalEmptyCreate));
@@ -1984,6 +1997,19 @@
         }
 
         const groupId = findGroupIdByName(name);
+        const nativeSelected = row.querySelector(SELECTORS.nativeSelectedIcon);
+        const rowSignature = [
+          name,
+          groupId || '',
+          meta.visibility,
+          Number.isFinite(meta.count) ? String(meta.count) : '',
+          currentGroupId || '',
+          nativeSelected ? '1' : '0',
+        ].join('|');
+
+        if (row.dataset.aeWhModalSig === rowSignature) {
+          continue;
+        }
 
         // The name/count container is the most stable insertion point we have found for dialog
         // row augmentation across rerenders and pagination updates.
@@ -2027,8 +2053,7 @@
           currentSlotEl.className = 'ae-wh-modal-current-slot';
           compactEl.appendChild(currentSlotEl);
         }
-
-        row.querySelectorAll('.ae-wh-modal-current-icon').forEach(el => el.remove());
+        row.dataset.aeWhModalSig = rowSignature;
 
         if (groupId) {
           const palette = paletteForGroup(groupId);
@@ -2038,17 +2063,49 @@
           badge.style.borderColor = palette.border;
           badge.style.color = palette.color;
           badge.querySelector('.ae-wh-badge__dot').style.backgroundColor = palette.dot;
+          badgeWrap.style.display = '';
+          metaEl.style.display = '';
 
-          metaEl.innerHTML = `
-            ${meta.visibility === 'private' ? '<span class="ae-wh-modal-privacy" title="Private">🔒</span>' : ''}
-            ${meta.visibility === 'public' ? '<span class="ae-wh-modal-privacy" title="Public">🌐</span>' : ''}
-            ${Number.isFinite(meta.count) ? `<span class="ae-wh-modal-count" title="${formatNumber(meta.count)} items">${formatNumber(meta.count)}</span>` : ''}
-          `;
+          let privacyEl = metaEl.querySelector('.ae-wh-modal-privacy');
+          if (!privacyEl) {
+            privacyEl = document.createElement('span');
+            privacyEl.className = 'ae-wh-modal-privacy';
+            metaEl.appendChild(privacyEl);
+          }
+
+          let countValueEl = metaEl.querySelector('.ae-wh-modal-count');
+          if (!countValueEl) {
+            countValueEl = document.createElement('span');
+            countValueEl.className = 'ae-wh-modal-count';
+            metaEl.appendChild(countValueEl);
+          }
+
+          if (meta.visibility === 'private') {
+            privacyEl.textContent = '🔒';
+            privacyEl.title = 'Private';
+            privacyEl.style.display = '';
+          } else if (meta.visibility === 'public') {
+            privacyEl.textContent = '🌐';
+            privacyEl.title = 'Public';
+            privacyEl.style.display = '';
+          } else {
+            privacyEl.style.display = 'none';
+            privacyEl.removeAttribute('title');
+          }
+
+          if (Number.isFinite(meta.count)) {
+            countValueEl.textContent = formatNumber(meta.count);
+            countValueEl.title = `${formatNumber(meta.count)} items`;
+            countValueEl.style.display = '';
+          } else {
+            countValueEl.textContent = '';
+            countValueEl.style.display = 'none';
+            countValueEl.removeAttribute('title');
+          }
 
           nameEl.style.display = 'none';
           if (countEl) countEl.style.display = 'none';
 
-          const nativeSelected = row.querySelector(SELECTORS.nativeSelectedIcon);
           const shouldMarkCurrent =
                 !nativeSelected &&
                 currentGroupId &&
@@ -2077,9 +2134,9 @@
           row.classList.remove('ae-wh-modal-current');
           nameEl.style.display = '';
           if (countEl) countEl.style.display = '';
-          if (badgeWrap) badgeWrap.style.display = 'none';
-          if (metaEl) metaEl.style.display = 'none';
-          if (currentSlotEl) currentSlotEl.replaceChildren();
+          badgeWrap.style.display = 'none';
+          metaEl.style.display = 'none';
+          currentSlotEl.replaceChildren();
         }
       }
 
