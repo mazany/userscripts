@@ -22,7 +22,7 @@ It makes the hidden/default wishlist manageable on the web UI by showing wishlis
 
 ## Current baseline
 
-Working baseline: **v0.6.4**
+Working baseline: **v0.6.6**
 
 ## Supported page
 
@@ -31,8 +31,9 @@ Working baseline: **v0.6.4**
 ## Installation
 
 1. Install a userscript manager such as **Tampermonkey**
-2. Create a new userscript
-3. Paste the contents of `userscript/aliexpress-wishlist-helper.user.js`
+2. Install directly from the raw userscript URL:
+   [aliexpress-wishlist-helper.user.js](https://raw.githubusercontent.com/mazany/userscripts/main/aliexpress-wishlist-helper/userscript/aliexpress-wishlist-helper.user.js)
+3. Or create a new userscript manually and paste the contents of `userscript/aliexpress-wishlist-helper.user.js`
 4. Save
 5. Open the AliExpress wishlist management page
 
@@ -87,6 +88,7 @@ In **Move to another list**:
 - current list is highlighted
 - privacy and item count are shown compactly
 - additional pages are auto-loaded via native scrolling behavior
+- repeated dialog openings re-arm auto-loading correctly
 
 ## Data model
 

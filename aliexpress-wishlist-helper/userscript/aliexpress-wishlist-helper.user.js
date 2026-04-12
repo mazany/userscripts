@@ -1,8 +1,13 @@
 // ==UserScript==
 // @name         AliExpress Wishlist Helper (Default Wishlist Filter)
 // @namespace    https://userscripts.mazy.cc/
-// @version      0.6.5
-// @description  Adds wishlist badges, filtering, edit-mode support, and move-dialog highlighting to AliExpress wishlist management page.
+// @version      0.6.6
+// @description  Adds wishlist badges, filters, edit-mode helpers, and move-dialog enhancements to AliExpress wishlist management.
+// @author       mazy
+// @homepageURL  https://github.com/mazany/userscripts/tree/main/aliexpress-wishlist-helper
+// @supportURL   https://github.com/mazany/userscripts/issues
+// @updateURL    https://raw.githubusercontent.com/mazany/userscripts/main/aliexpress-wishlist-helper/userscript/aliexpress-wishlist-helper.user.js
+// @downloadURL  https://raw.githubusercontent.com/mazany/userscripts/main/aliexpress-wishlist-helper/userscript/aliexpress-wishlist-helper.user.js
 // @match        https://www.aliexpress.com/p/wish-manage/index.html*
 // @run-at       document-start
 // @grant        none
@@ -89,6 +94,7 @@
     moveDialogAutoLoadRunning: false,
     moveDialogAutoLoadQueued: false,
     moveDialogAutoLoadDone: false,
+    moveDialogLastRowCount: 0,
     allVisibleMaster: false,
     inMoveDialogAnnotate: false,
     pendingSingleItemId: null,
@@ -702,7 +708,7 @@
         const matches = recordMatchesActiveFilter(record);
         const checked = isCardChecked(root);
 
-        // Když položka novému filtru nevyhovuje a je selected, odznač ji.
+        // Deselect cards that no longer belong to the active filter.
         if (!matches && checked) {
           changed = toggleCardSelection(root, false) || changed;
         }
@@ -1196,6 +1202,7 @@
     state.moveDialogAutoLoadRunning = false;
     state.moveDialogAutoLoadQueued = false;
     state.moveDialogAutoLoadDone = false;
+    state.moveDialogLastRowCount = 0;
   }
 
   function getMoveDialogScrollEl(modal = null) {
@@ -1229,9 +1236,6 @@
     const title = modal.querySelector(SELECTORS.modalTitle)?.textContent?.trim() || '';
     if (!/move to another list/i.test(title)) return;
 
-    const scrollEl = getMoveDialogScrollEl(modal);
-    const initialScrollTop = scrollEl ? scrollEl.scrollTop : 0;
-
     state.moveDialogAutoLoadDone = true;
     state.moveDialogAutoLoadQueued = true;
 
@@ -1252,6 +1256,9 @@
 
     const title = modal.querySelector(SELECTORS.modalTitle)?.textContent?.trim() || '';
     if (!/move to another list/i.test(title)) return false;
+
+    const scrollEl = getMoveDialogScrollEl(modal);
+    const initialScrollTop = scrollEl ? scrollEl.scrollTop : 0;
 
     state.moveDialogAutoLoadRunning = true;
     try {
@@ -1643,6 +1650,14 @@
     .filter(row => !row.querySelector(SELECTORS.modalEmptyCreate));
 
     if (!rows.length) return;
+
+    if (!state.moveDialogAutoLoadRunning && rows.length < state.moveDialogLastRowCount) {
+      // AliExpress appears to reuse the same modal node between openings.
+      // When the row count drops back down, treat it as a fresh dialog session
+      // so auto-loading can run again on the reset first page.
+      state.moveDialogAutoLoadDone = false;
+    }
+    state.moveDialogLastRowCount = rows.length;
 
     const currentGroupId = state.moveDialogContext?.currentGroupId || null;
 

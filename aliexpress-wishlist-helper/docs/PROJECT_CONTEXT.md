@@ -20,7 +20,7 @@ Primary goals:
   - load more list metadata automatically
 - keep the script robust enough for real daily use on the AliExpress web UI
 
-Current uploaded baseline: **version 0.6.4**.
+Current uploaded baseline: **version 0.6.6**.
 
 ---
 
@@ -214,10 +214,7 @@ Important outcome:
 - this approach works
 - it is less disruptive after scroll restoration was added
 - it avoids request signing / integrity issues
-
-`[TODO]` there's a bug currently that opening the dialog for the second and consecutive times doesn't force automatic loading of additional pages and we are left with only the first 10 lists *(page 1)*
-
-Current version with this behavior: **0.6.4**.
+- reopening the dialog now correctly re-arms auto-loading when AliExpress reuses the same modal node and resets the list back to page 1
 
 ---
 
@@ -352,7 +349,7 @@ As of the latest working baseline:
 - switching filters in edit mode behaves correctly
 - move dialog rows are color-coded and compact
 - current list is highlighted in the move dialog
-- additional move dialog pages can be loaded automatically (there's a bug, see `[TODO]` above)
+- additional move dialog pages can be loaded automatically, including after closing and reopening the dialog
 - palette slots are stable across sessions
 
 ---
@@ -469,9 +466,8 @@ When making changes, avoid mixing these concerns.
 
 Recommended immediate next task:
 
-1. **fix** existing **known bugs** and TODOs
-2. double check existing logic for **performance** *(too many hooks, duplicate hooks, big / out of date structures, ...)*
-   - implement **clickable badges**
+1. double check existing logic for **performance** *(too many hooks, duplicate hooks, big / out of date structures, ...)*
+2. implement **clickable badges**
 3. then improve **post-move immediate UI update**
 4. optionally add a manual **Load wishlists' info** action
 
@@ -483,4 +479,4 @@ That order should keep risk low while giving visible UX improvements.
 
 Current uploaded working script baseline:
 
-- `AliExpress Wishlist Helper (Default Wishlist Filter)-0.6.4.user.js`
+- `AliExpress Wishlist Helper (Default Wishlist Filter)-0.6.6.user.js`

@@ -175,7 +175,7 @@ Expected:
 
 ---
 
-## 12. Move dialog — auto-load
+## 12. Move dialog - auto-load
 
 Open **Move to another list** when there are more lists than initially visible.
 
@@ -185,6 +185,13 @@ Expected:
 - dialog does not continuously force-scroll after loading finishes
 - user can scroll normally afterward
 - scroll position is restored or remains usable
+
+Repeat:
+- close the dialog and open it again
+
+Expected:
+- additional pages load automatically again on later openings
+- the second and later openings do not stay stuck on the initial page only
 
 ---
 
