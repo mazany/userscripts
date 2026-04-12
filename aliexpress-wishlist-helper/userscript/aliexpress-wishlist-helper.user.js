@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AliExpress Wishlist Helper (Default Wishlist Filter)
 // @namespace    https://userscripts.mazy.cc/
-// @version      0.6.11
+// @version      0.6.12
 // @description  Adds clickable wishlist badges, filters, edit-mode helpers, and move-dialog enhancements to AliExpress wishlist management.
 // @author       mazy
 // @homepageURL  https://github.com/mazany/userscripts/tree/main/aliexpress-wishlist-helper
@@ -1591,12 +1591,6 @@
   }
 
   function getCardRoots() {
-    const roots = Array.from(document.querySelectorAll(SELECTORS.editItemWrap))
-      .filter(root => root.querySelector(SELECTORS.productCard));
-
-    if (roots.length) return roots;
-
-    // fallback
     const cards = Array.from(document.querySelectorAll(SELECTORS.productCard));
     const set = new Set();
     for (const card of cards) {
@@ -1608,6 +1602,8 @@
 
   function ensureCardItemIds(cardRoots) {
     cardRoots.forEach((root, index) => {
+      if (root.dataset.aeWhItemId) return;
+
       const operator = root.querySelector(SELECTORS.operator);
       const operatorId = operator ? extractItemIdFromOperator(operator) : null;
 
@@ -1615,8 +1611,6 @@
         root.dataset.aeWhItemId = operatorId;
         return;
       }
-
-      if (root.dataset.aeWhItemId) return;
 
       const byOrder = state.loadedOrder[index];
       if (byOrder) {
@@ -1738,6 +1732,8 @@
     let label = 'Unknown';
     let palette = unknownPalette();
     let groupId = '';
+    let title = '';
+    let ariaLabel = '';
 
     if (record) {
       groupId = record.g;
@@ -1749,28 +1745,53 @@
       palette = paletteForGroup(groupId);
     }
 
+    const clickable =
+      !!record &&
+      (groupId !== DEFAULT_GROUP_ID || state.filter === FILTERS.ALL);
+
+    if (clickable && groupId !== DEFAULT_GROUP_ID) {
+      title = `Open wishlist "${label}"\nCtrl+click to open in a new tab\nShift+click to open in a new window`;
+      ariaLabel = `Open wishlist ${label}`;
+    } else if (clickable) {
+      title = 'Show only Default wishlist items';
+      ariaLabel = 'Filter to Default wishlist';
+    }
+
+    const badgeSignature = [
+      label,
+      palette.bg,
+      palette.border,
+      palette.color,
+      palette.dot,
+      clickable ? '1' : '0',
+      groupId,
+      title,
+      ariaLabel,
+    ].join('|');
+
+    if (badge.dataset.aeWhBadgeSig === badgeSignature) {
+      return;
+    }
+    badge.dataset.aeWhBadgeSig = badgeSignature;
+
+    badge.dataset.aeWhGroupId = groupId;
     badge.querySelector('.ae-wh-badge__text').textContent = label;
     badge.style.backgroundColor = palette.bg;
     badge.style.borderColor = palette.border;
     badge.style.color = palette.color;
     badge.querySelector('.ae-wh-badge__dot').style.backgroundColor = palette.dot;
-
-    const clickable =
-      !!record &&
-      (groupId !== DEFAULT_GROUP_ID || state.filter === FILTERS.ALL);
-
-    badge.dataset.aeWhGroupId = groupId;
     badge.disabled = !clickable;
     badge.classList.toggle('ae-wh-badge--clickable', clickable);
 
-    if (clickable && groupId !== DEFAULT_GROUP_ID) {
-      badge.title = `Open wishlist "${label}"\nCtrl+click to open in a new tab\nShift+click to open in a new window`;
-      badge.setAttribute('aria-label', `Open wishlist ${label}`);
-    } else if (clickable) {
-      badge.title = 'Show only Default wishlist items';
-      badge.setAttribute('aria-label', 'Filter to Default wishlist');
+    if (title) {
+      badge.title = title;
     } else {
       badge.removeAttribute('title');
+    }
+
+    if (ariaLabel) {
+      badge.setAttribute('aria-label', ariaLabel);
+    } else {
       badge.removeAttribute('aria-label');
     }
   }

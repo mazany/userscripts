@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.12 - 2026-04-13
+
+- simplified `getCardRoots()` to build the root list directly from product cards instead of first scanning wrapper nodes
+- made `ensureCardItemIds()` skip DOM lookups for cards that already have a cached item id
+- added badge signatures so existing card badges are not restyled or relabeled when nothing relevant changed
+
 ## 0.6.11 - 2026-04-12
 
 - stopped move-dialog processing when the modal is hidden or otherwise not visibly open
