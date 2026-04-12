@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AliExpress Wishlist Helper (Default Wishlist Filter)
 // @namespace    https://userscripts.mazy.cc/
-// @version      0.6.8
+// @version      0.6.10
 // @description  Adds clickable wishlist badges, filters, edit-mode helpers, and move-dialog enhancements to AliExpress wishlist management.
 // @author       mazy
 // @homepageURL  https://github.com/mazany/userscripts/tree/main/aliexpress-wishlist-helper
@@ -87,9 +87,17 @@
     filter: loadFilter(),
     saveTimer: 0,
     refreshTimer: 0,
+    refreshNeedsFullCardScan: true,
+    pendingRefreshCardRoots: new Set(),
     toolbarEl: null,
     loadedOrder: [],                         // itemId order as loaded in All items
     loadedOrderSet: new Set(),
+    loadedCardStats: {
+      defaultCount: 0,
+      customCount: 0,
+      unknownCount: 0,
+      loadedCount: 0,
+    },
     moveDialogContext: null,                 // { currentGroupId: string|null, selectedItemIds: string[] }
     modalObserver: null,
     moveDialogAutoLoadRunning: false,
@@ -1123,35 +1131,164 @@
     scheduleRefresh();
   }
 
+  function isHelperUiNode(node) {
+    if (!(node instanceof Element)) return false;
+
+    if (node.id === 'ae-wh-style') return true;
+
+    return !!node.closest(
+      '.ae-wh-toolbar, .ae-wh-meta-row, .ae-wh-all-visible-wrap, .ae-wh-modal-compact, .ae-wh-loadmore-spacer'
+    );
+  }
+
+  function isMoveDialogNode(node) {
+    return node instanceof Element &&
+      (node.matches(SELECTORS.modal) || !!node.closest(SELECTORS.modal));
+  }
+
+  function isRelevantGlobalMutationTarget(node) {
+    if (!(node instanceof Element) || isHelperUiNode(node)) return false;
+
+    if (isMoveDialogNode(node)) {
+      return node.matches(SELECTORS.modal);
+    }
+
+    return !!(
+      node.matches?.(SELECTORS.tabsHeader) ||
+      node.closest?.(SELECTORS.tabsHeader) ||
+      node.matches?.(SELECTORS.editItemWrap) ||
+      node.closest?.(SELECTORS.editItemWrap) ||
+      node.matches?.(SELECTORS.footerBarCheckboxLabel) ||
+      node.closest?.(SELECTORS.footerBarCheckboxLabel)
+    );
+  }
+
+  function isRelevantGlobalMutationNode(node) {
+    if (!(node instanceof Element) || isHelperUiNode(node)) return false;
+
+    if (node.matches?.(SELECTORS.modal) || node.querySelector?.(SELECTORS.modal)) {
+      return true;
+    }
+
+    if (isMoveDialogNode(node)) {
+      return false;
+    }
+
+    return !!(
+      node.matches?.(SELECTORS.editItemWrap) ||
+      node.querySelector?.(SELECTORS.editItemWrap) ||
+      node.matches?.(SELECTORS.productCard) ||
+      node.querySelector?.(SELECTORS.productCard) ||
+      node.matches?.(SELECTORS.tabsHeader) ||
+      node.querySelector?.(SELECTORS.tabsHeader) ||
+      node.matches?.(SELECTORS.footerBarCheckboxLabel) ||
+      node.querySelector?.(SELECTORS.footerBarCheckboxLabel)
+    );
+  }
+
+  function collectCardRootsFromNode(node, cardRoots) {
+    if (!(node instanceof Element) || isHelperUiNode(node)) return;
+
+    if (node.matches?.(SELECTORS.editItemWrap)) {
+      cardRoots.add(node);
+    }
+
+    if (node.querySelectorAll) {
+      node.querySelectorAll(SELECTORS.editItemWrap).forEach(root => cardRoots.add(root));
+    }
+
+    if (node.matches?.(SELECTORS.productCard)) {
+      cardRoots.add(node.closest(SELECTORS.editItemWrap) || node);
+    }
+
+    if (node.querySelectorAll) {
+      node.querySelectorAll(SELECTORS.productCard).forEach(card => {
+        cardRoots.add(card.closest(SELECTORS.editItemWrap) || card);
+      });
+    }
+
+    const ancestorRoot = node.closest?.(SELECTORS.editItemWrap);
+    if (ancestorRoot) {
+      cardRoots.add(ancestorRoot);
+    }
+  }
+
   function installDomObserver() {
     const observer = new MutationObserver(mutations => {
       let relevant = false;
+      let needsFullRefresh = false;
+      const affectedCardRoots = new Set();
 
       for (const mutation of mutations) {
         if (mutation.type === 'attributes') {
-          if (mutation.target instanceof Element) {
+          if (isRelevantGlobalMutationTarget(mutation.target)) {
+            relevant = true;
+
             if (
-              mutation.target.matches?.(SELECTORS.tabsHeader) ||
-              mutation.target.closest?.(SELECTORS.tabsHeader) ||
-              mutation.target.matches?.(SELECTORS.editItemWrap) ||
-              mutation.target.closest?.(SELECTORS.editItemWrap)
+              mutation.target instanceof Element &&
+              (
+                mutation.target.matches?.(SELECTORS.tabsHeader) ||
+                mutation.target.closest?.(SELECTORS.tabsHeader) ||
+                mutation.target.matches?.(SELECTORS.footerBarCheckboxLabel) ||
+                mutation.target.closest?.(SELECTORS.footerBarCheckboxLabel) ||
+                mutation.target.matches?.(SELECTORS.modal)
+              )
             ) {
-              relevant = true;
-              break;
+              needsFullRefresh = true;
+            } else {
+              collectCardRootsFromNode(mutation.target, affectedCardRoots);
             }
+
+            break;
           }
         }
 
         for (const node of mutation.addedNodes) {
-          if (!(node instanceof Element)) continue;
-
-          if (
-            node.matches?.(SELECTORS.editItemWrap) ||
-            node.querySelector?.(SELECTORS.editItemWrap) ||
-            node.matches?.(SELECTORS.tabsHeader) ||
-            node.querySelector?.(SELECTORS.tabsHeader)
-          ) {
+          if (isRelevantGlobalMutationNode(node)) {
             relevant = true;
+
+            if (
+              node instanceof Element &&
+              (
+                node.matches?.(SELECTORS.tabsHeader) ||
+                node.querySelector?.(SELECTORS.tabsHeader) ||
+                node.matches?.(SELECTORS.footerBarCheckboxLabel) ||
+                node.querySelector?.(SELECTORS.footerBarCheckboxLabel) ||
+                node.matches?.(SELECTORS.modal) ||
+                node.querySelector?.(SELECTORS.modal)
+              )
+            ) {
+              needsFullRefresh = true;
+            } else {
+              collectCardRootsFromNode(node, affectedCardRoots);
+            }
+
+            break;
+          }
+        }
+
+        if (relevant) break;
+
+        for (const node of mutation.removedNodes) {
+          if (isRelevantGlobalMutationNode(node)) {
+            relevant = true;
+
+            if (
+              node instanceof Element &&
+              (
+                node.matches?.(SELECTORS.tabsHeader) ||
+                node.querySelector?.(SELECTORS.tabsHeader) ||
+                node.matches?.(SELECTORS.footerBarCheckboxLabel) ||
+                node.querySelector?.(SELECTORS.footerBarCheckboxLabel) ||
+                node.matches?.(SELECTORS.modal) ||
+                node.querySelector?.(SELECTORS.modal)
+              )
+            ) {
+              needsFullRefresh = true;
+            } else {
+              collectCardRootsFromNode(node, affectedCardRoots);
+            }
+
             break;
           }
         }
@@ -1159,7 +1296,13 @@
         if (relevant) break;
       }
 
-      if (relevant) scheduleRefresh();
+      if (relevant) {
+        if (!needsFullRefresh && affectedCardRoots.size > 0) {
+          scheduleRefresh({ cardRoots: [...affectedCardRoots] });
+        } else {
+          scheduleRefresh();
+        }
+      }
     });
 
     observer.observe(document.documentElement, {
@@ -1170,17 +1313,37 @@
     });
   }
 
-  function scheduleRefresh() {
+  function scheduleRefresh(options = null) {
+    const cardRoots = Array.isArray(options?.cardRoots) ? options.cardRoots : null;
+
+    if (cardRoots && cardRoots.length && !state.refreshNeedsFullCardScan) {
+      cardRoots.forEach(root => {
+        if (root instanceof Element) {
+          state.pendingRefreshCardRoots.add(root);
+        }
+      });
+    } else {
+      state.refreshNeedsFullCardScan = true;
+    }
+
     if (state.refreshTimer) return;
 
     state.refreshTimer = window.requestAnimationFrame(() => {
       state.refreshTimer = 0;
 
-      const cardRoots = getCardRoots();
-      ensureCardItemIds(cardRoots);
+      const fullCardScan =
+        state.refreshNeedsFullCardScan || state.pendingRefreshCardRoots.size === 0;
+      const roots = fullCardScan
+        ? getCardRoots()
+        : [...state.pendingRefreshCardRoots];
+
+      state.refreshNeedsFullCardScan = false;
+      state.pendingRefreshCardRoots.clear();
+
+      ensureCardItemIds(roots.filter(root => root instanceof Element && root.isConnected));
 
       renderToolbar();
-      annotateAndFilterCards(cardRoots);
+      annotateAndFilterCards(roots, { fullScan: fullCardScan });
       renderAllVisibleControl();
       syncAllVisibleControl();
       annotateMoveDialog();
@@ -1448,26 +1611,64 @@
     });
   }
 
-  function annotateAndFilterCards(cardRoots = null) {
+  function updateLoadedCardStats(counts, category, delta) {
+    if (!category || !delta) return;
+
+    if (category === FILTERS.DEFAULT) {
+      counts.defaultCount += delta;
+    } else if (category === FILTERS.CUSTOM) {
+      counts.customCount += delta;
+    } else if (category === FILTERS.UNKNOWN) {
+      counts.unknownCount += delta;
+    }
+  }
+
+  function getRecordCategory(record) {
+    if (!record) return FILTERS.UNKNOWN;
+    return record.g === DEFAULT_GROUP_ID ? FILTERS.DEFAULT : FILTERS.CUSTOM;
+  }
+
+  function annotateAndFilterCards(cardRoots = null, options = {}) {
     const inAllItems = shouldShowToolbar();
     const roots = cardRoots || getCardRoots();
+    const fullScan = options.fullScan !== false;
 
-    ensureCardItemIds(roots);
-
-    let defaultCount = 0;
-    let customCount = 0;
-    let unknownCount = 0;
+    let counts = fullScan
+      ? {
+          defaultCount: 0,
+          customCount: 0,
+          unknownCount: 0,
+          loadedCount: 0,
+        }
+      : { ...state.loadedCardStats };
 
     for (const cardRoot of roots) {
+      if (!(cardRoot instanceof Element)) continue;
+
+      const previousCategory = cardRoot.dataset.aeWhCategory || '';
+
+      if (
+        !cardRoot.isConnected ||
+        !(cardRoot.matches?.(SELECTORS.productCard) || cardRoot.querySelector(SELECTORS.productCard))
+      ) {
+        if (!fullScan && previousCategory) {
+          updateLoadedCardStats(counts, previousCategory, -1);
+          delete cardRoot.dataset.aeWhCategory;
+        }
+        continue;
+      }
+
       const itemId = cardRoot.dataset.aeWhItemId || '';
       const record = itemId ? state.items[itemId] || null : null;
+      const nextCategory = getRecordCategory(record);
 
-      if (record) {
-        if (record.g === DEFAULT_GROUP_ID) defaultCount++;
-        else customCount++;
-      } else {
-        unknownCount++;
+      if (fullScan) {
+        updateLoadedCardStats(counts, nextCategory, 1);
+      } else if (previousCategory !== nextCategory) {
+        updateLoadedCardStats(counts, previousCategory, -1);
+        updateLoadedCardStats(counts, nextCategory, 1);
       }
+      cardRoot.dataset.aeWhCategory = nextCategory;
 
       if (inAllItems) {
         if (itemId) {
@@ -1480,12 +1681,10 @@
       }
     }
 
-    updateButtonCounts({
-      defaultCount,
-      customCount,
-      unknownCount,
-      loadedCount: defaultCount + customCount + unknownCount,
-    });
+    counts.loadedCount = counts.defaultCount + counts.customCount + counts.unknownCount;
+    state.loadedCardStats = counts;
+
+    updateButtonCounts(counts);
   }
 
   function extractItemIdFromOperator(operator) {

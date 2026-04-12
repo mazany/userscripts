@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.6.10 - 2026-04-12
+
+- changed the refresh scheduler so observer-driven updates can reprocess only affected card roots instead of rescanning every card
+- added incremental loaded-card count tracking so toolbar counts stay correct during partial card refreshes
+- kept full refreshes for filter changes, network payload changes, and other broad state changes to keep this optimization low risk
+
+## 0.6.9 - 2026-04-12
+
+- narrowed the global `MutationObserver` so it ignores helper UI churn and most move-dialog internal updates
+- added removed-node handling so dialog open/close and major card-container teardown still trigger a refresh
+- kept the existing refresh pipeline unchanged to make this a focused performance-only pass
+
 ## 0.6.8 - 2026-04-12
 
 - custom-list product badges now open the native `wish-manage/detail.html?wishGroupId=...` page instead of the filtered `index.html` view
