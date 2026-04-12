@@ -20,7 +20,7 @@ Primary goals:
   - load more list metadata automatically
 - keep the script robust enough for real daily use on the AliExpress web UI
 
-Current uploaded baseline: **version 0.6.12**.
+Current uploaded baseline: **version 0.6.14**.
 
 ---
 
@@ -469,4 +469,4 @@ That order should keep risk low while giving visible UX improvements.
 
 Current uploaded working script baseline:
 
-- `AliExpress Wishlist Helper (Default Wishlist Filter)-0.6.12.user.js`
+- `AliExpress Wishlist Helper (Default Wishlist Filter)-0.6.14.user.js`

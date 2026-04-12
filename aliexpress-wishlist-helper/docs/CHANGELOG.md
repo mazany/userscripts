@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.6.14 - 2026-04-13
+
+- skipped expensive move-dialog context tracking on helper-toolbar, "All visible", native footer "All", card checkbox, and card menu-button clicks that cannot open the dialog directly
+- reduced redundant "All visible" full-card scans during refresh by reusing already known card roots and avoiding an extra mismatch pass when a reconcile verification is already queued
+
+## 0.6.13 - 2026-04-13
+
+- reduced edit-mode "All visible" filter-switch overhead by restoring page scroll once per batch selection pass instead of after every checkbox toggle
+- kept the existing checkbox overlay click workaround while making bulk reconcile and prune passes less layout-heavy
+
 ## 0.6.12 - 2026-04-13
 
 - simplified `getCardRoots()` to build the root list directly from product cards instead of first scanning wrapper nodes

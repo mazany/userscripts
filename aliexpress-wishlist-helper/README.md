@@ -22,7 +22,7 @@ It makes the hidden/default wishlist manageable on the web UI by showing wishlis
 
 ## Current baseline
 
-Working baseline: **v0.6.12**
+Working baseline: **v0.6.14**
 
 ## Supported page
 

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AliExpress Wishlist Helper (Default Wishlist Filter)
 // @namespace    https://userscripts.mazy.cc/
-// @version      0.6.12
+// @version      0.6.14
 // @description  Adds clickable wishlist badges, filters, edit-mode helpers, and move-dialog enhancements to AliExpress wishlist management.
 // @author       mazy
 // @homepageURL  https://github.com/mazany/userscripts/tree/main/aliexpress-wishlist-helper
@@ -479,6 +479,15 @@
         }
       }
 
+      if (
+        target.closest('.ae-wh-toolbar, .ae-wh-all-visible-wrap') ||
+        footerAllLabel ||
+        itemOverlay ||
+        moreBtn
+      ) {
+        return;
+      }
+
       trackMoveDialogContext(target);
     }, true);
   }
@@ -582,8 +591,9 @@
     return style.display !== 'none' && style.visibility !== 'hidden';
   }
 
-  function getVisibleCardRoots() {
-    return getCardRoots().filter(root => isElementVisible(root));
+  function getVisibleCardRoots(cardRoots = null) {
+    const roots = cardRoots || getCardRoots();
+    return roots.filter(root => isElementVisible(root));
   }
 
   function isWishlistDetailPage() {
@@ -599,20 +609,25 @@
     return !!label?.classList.contains('comet-v2-checkbox-checked');
   }
 
-  function toggleCardSelection(cardRoot, shouldBeChecked) {
+  function restoreWindowScroll(snapshot) {
+    if (!snapshot) return;
+    if (window.scrollX === snapshot.x && window.scrollY === snapshot.y) return;
+    window.scrollTo(snapshot.x, snapshot.y);
+  }
+
+  function toggleCardSelection(cardRoot, shouldBeChecked, scrollSnapshot = null) {
     const overlay = getCardCheckboxOverlay(cardRoot);
     if (!overlay) return false;
 
     const currentlyChecked = isCardChecked(cardRoot);
     if (currentlyChecked === shouldBeChecked) return false;
+    const fallbackSnapshot = scrollSnapshot || { x: window.scrollX, y: window.scrollY };
 
     // The disabled-looking overlay is the most reliable native click target in edit mode.
     // Clicking other checkbox descendants can miss the toggle or produce scroll jumps.
-    const scrollX = window.scrollX;
-    const scrollY = window.scrollY;
-
     overlay.click();
-    window.scrollTo(scrollX, scrollY);
+
+    if (!scrollSnapshot) restoreWindowScroll(fallbackSnapshot);
     return true;
   }
 
@@ -629,7 +644,7 @@
     return null;
   }
 
-  function renderAllVisibleControl() {
+  function renderAllVisibleControl(options = {}) {
     if (!isEditModeActive()) {
       document.querySelectorAll('.ae-wh-all-visible-wrap').forEach(el => el.remove());
       state.allVisibleMaster = false;
@@ -665,13 +680,15 @@
           reconcileAllVisibleSelection();
           scheduleReconcileVerification();
         } else {
+          const scrollSnapshot = { x: window.scrollX, y: window.scrollY };
           state.applyingAllVisible = true;
           try {
             for (const root of getCardRoots()) {
-              toggleCardSelection(root, false);
+              toggleCardSelection(root, false, scrollSnapshot);
             }
           } finally {
             state.applyingAllVisible = false;
+            restoreWindowScroll(scrollSnapshot);
           }
 
           requestAnimationFrame(() => {
@@ -686,11 +703,12 @@
       nativeAllLabel.parentElement?.insertAdjacentElement('afterend', wrap);
     }
 
-    syncAllVisibleControl();
+    syncAllVisibleControl(options);
   }
 
-  function syncAllVisibleControl() {
+  function syncAllVisibleControl(options = {}) {
     if (state.applyingAllVisible) return;
+    const { cardRoots = null, skipMismatchCheck = false } = options;
 
     const wrap = document.querySelector('.ae-wh-all-visible-wrap');
     if (!wrap) return;
@@ -702,14 +720,14 @@
       input.checked = true;
       input.indeterminate = false;
 
-      if (!state.reconcileScheduled && getAllVisibleMismatches().length) {
+      if (!skipMismatchCheck && !state.reconcileScheduled && getAllVisibleMismatches(cardRoots).length) {
         scheduleReconcileVerification();
       }
 
       return;
     }
 
-    const visibleRoots = getVisibleCardRoots();
+    const visibleRoots = getVisibleCardRoots(cardRoots);
     const total = visibleRoots.length;
     const selected = visibleRoots.filter(isCardChecked).length;
 
@@ -735,6 +753,7 @@
     if (state.applyingAllVisible) return false;
 
     const roots = cardRoots || getCardRoots();
+    const scrollSnapshot = { x: window.scrollX, y: window.scrollY };
     let changed = false;
 
     state.applyingAllVisible = true;
@@ -748,11 +767,12 @@
 
         // Deselect cards that no longer belong to the active filter.
         if (!matches && checked) {
-          changed = toggleCardSelection(root, false) || changed;
+          changed = toggleCardSelection(root, false, scrollSnapshot) || changed;
         }
       }
     } finally {
       state.applyingAllVisible = false;
+      restoreWindowScroll(scrollSnapshot);
     }
 
     return changed;
@@ -762,6 +782,7 @@
     if (!state.allVisibleMaster || state.applyingAllVisible) return false;
 
     const roots = cardRoots || getCardRoots();
+    const scrollSnapshot = { x: window.scrollX, y: window.scrollY };
     let changed = false;
 
     state.applyingAllVisible = true;
@@ -771,10 +792,11 @@
         const record = itemId ? state.items[itemId] || null : null;
         const shouldBeChecked = recordMatchesActiveFilter(record);
 
-        changed = toggleCardSelection(root, shouldBeChecked) || changed;
+        changed = toggleCardSelection(root, shouldBeChecked, scrollSnapshot) || changed;
       }
     } finally {
       state.applyingAllVisible = false;
+      restoreWindowScroll(scrollSnapshot);
     }
 
     return changed;
@@ -1341,14 +1363,17 @@
       state.pendingRefreshCardRoots.clear();
 
       ensureCardItemIds(roots.filter(root => root instanceof Element && root.isConnected));
+      const editModeActive = isEditModeActive();
 
       renderToolbar();
       annotateAndFilterCards(roots, { fullScan: fullCardScan });
-      renderAllVisibleControl();
-      syncAllVisibleControl();
+      renderAllVisibleControl({
+        cardRoots: fullCardScan ? roots : null,
+        skipMismatchCheck: state.allVisibleMaster && editModeActive,
+      });
       annotateMoveDialog();
 
-      if (state.allVisibleMaster && isEditModeActive() && !state.reconcileScheduled) {
+      if (state.allVisibleMaster && editModeActive && !state.reconcileScheduled) {
         scheduleReconcileVerification();
       }
     });
