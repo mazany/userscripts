@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.6.29 - 2026-04-13
+
+- disabled the global `fetch` hook on the experimental branch and now rely on XHR interception only, because any global `window.fetch` wrapper continued to attribute unrelated third-party request failures to the userscript in DevTools
+
+## 0.6.28 - 2026-04-13
+
+- made the global `fetch` hook transparent for non-wishlist URLs by removing the blanket `async/await` wrapper, reducing the chance that third-party request failures appear attributed to the userscript in DevTools
+
+## 0.6.27 - 2026-04-13
+
+- added experimental stale-while-refresh background hydration for `itemgroup.list` metadata, including a fallback request builder from already captured wishlist templates, a recency guard, and a manual debug trigger that no longer depends on opening the move dialog first
+
 ## 0.6.26 - 2026-04-13
 
 - taught the experimental native `itemgroup.list` page-size patch to handle object-shaped request payloads in addition to JSON strings, and expanded its debug output with payload type and keys

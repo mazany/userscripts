@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AliExpress Wishlist Helper (Default Wishlist Filter)
 // @namespace    https://userscripts.mazy.cc/
-// @version      0.6.26
+// @version      0.6.29
 // @description  Adds clickable wishlist badges, filters, edit-mode helpers, and move-dialog enhancements to AliExpress wishlist management.
 // @author       mazy
 // @homepageURL  https://github.com/mazany/userscripts/tree/main/aliexpress-wishlist-helper
@@ -48,6 +48,11 @@
     moveDialogAutoLoadSpacerPx: 160,
     preferredMoveDialogPageSize: 16,
     itemGroupListFallbackPageSize: 10,
+    backgroundItemGroupHydration: true,
+    backgroundItemGroupHydrationDelayMs: 1200,
+    backgroundItemGroupHydrationRetryDelayMs: 1800,
+    backgroundItemGroupHydrationMaxAttempts: 6,
+    backgroundItemGroupHydrationStaleMs: 1000 * 60 * 60 * 6,
 
     debugWishlistApiTracing: true,
     debugWishlistApiTraceLimit: 40,
@@ -107,6 +112,7 @@
     moveDialogContext: null,                 // { currentGroupId: string|null, selectedItemIds: string[] }
     itemGroupListRequest: null,              // last observed itemgroup.list request template
     itemGroupListTotalCount: null,
+    itemGroupListHydratedAt: null,
     itemGroupListHydrationPromise: null,
     wishlistRequestTemplates: Object.create(null),
     wishlistApiTrace: [],
@@ -115,6 +121,8 @@
     nextDebugObjectId: 1,
     mtopItemGroupListPatchInstalled: false,
     lastAdjustedItemGroupListRequest: null,
+    backgroundItemGroupHydrationTimer: 0,
+    backgroundItemGroupHydrationAttempts: 0,
     modalObserver: null,
     moveDialogAutoLoadRunning: false,
     moveDialogAutoLoadQueued: false,
@@ -146,6 +154,7 @@
       installMtopItemGroupListPatch();
       installDomObserver();
       scheduleRefresh();
+      scheduleBackgroundItemGroupHydration();
     };
 
     if (document.readyState === 'loading') {
@@ -409,7 +418,6 @@
   }
 
   function installNetworkHooks() {
-    hookFetch();
     hookXHR();
   }
 
@@ -550,9 +558,17 @@
       getLastAdjustedItemGroupListRequest: () => state.lastAdjustedItemGroupListRequest
         ? JSON.parse(JSON.stringify(state.lastAdjustedItemGroupListRequest))
         : null,
+      getBackgroundItemGroupHydrationStatus: () => ({
+        enabled: CONFIG.backgroundItemGroupHydration,
+        attempts: state.backgroundItemGroupHydrationAttempts,
+        scheduled: !!state.backgroundItemGroupHydrationTimer,
+        hydratedAt: state.itemGroupListHydratedAt,
+        totalCount: state.itemGroupListTotalCount,
+      }),
       buildItemGroupListRequest,
       fetchItemGroupPage,
       fetchAllItemGroupPages,
+      hydrateItemGroupListsInBackground: () => hydrateItemGroupListsInBackground({ force: true }),
     };
   }
 
@@ -605,8 +621,13 @@
     if (typeof window.fetch !== 'function') return;
 
     const originalFetch = window.fetch;
-    window.fetch = async function (...args) {
+    window.fetch = function (...args) {
       const url = extractUrlFromFetchArgs(args);
+
+      if (!isRelevantWishlistUrl(url)) {
+        return originalFetch.apply(this, args);
+      }
+
       const traceEntry = captureWishlistRequest(
         url,
         args?.[1]?.method || 'GET',
@@ -615,22 +636,17 @@
         'fetch'
       );
 
-      if (!isRelevantWishlistUrl(url)) {
-        const response = await originalFetch.apply(this, args);
+      return originalFetch.apply(this, args).then(response => {
         captureWishlistResponse(traceEntry, response);
+
+        try {
+          response.clone().text()
+            .then(text => processNetworkPayload(url, text))
+            .catch(() => {});
+        } catch (_) {}
+
         return response;
-      }
-
-      const response = await originalFetch.apply(this, args);
-      captureWishlistResponse(traceEntry, response);
-
-      try {
-        response.clone().text()
-          .then(text => processNetworkPayload(url, text))
-          .catch(() => {});
-      } catch (_) {}
-
-      return response;
+      });
     };
   }
 
@@ -1022,12 +1038,16 @@
       state.itemGroupListRequest ||
       state.wishlistRequestTemplates['mtop.aliexpress.wishlist.itemgroup.list'];
 
-    if (!template?.data) return null;
+    const baseData = template?.data || getFallbackItemGroupListRequestData();
+    if (!baseData) return null;
 
     const nextData = {
-      ...template.data,
+      ...baseData,
       ...overrides,
       pageNum,
+      pageSize: toFiniteOrNull(overrides?.pageSize) || toFiniteOrNull(baseData.pageSize) || CONFIG.preferredMoveDialogPageSize,
+      wishGroupId: null,
+      onlyGroup: true,
     };
 
     return {
@@ -1085,6 +1105,12 @@
         changed = processFetchedItemGroupListResponse(response) || changed;
       }
 
+      const hydratedAt = Date.now();
+      if (state.itemGroupListHydratedAt !== hydratedAt) {
+        state.itemGroupListHydratedAt = hydratedAt;
+        changed = true;
+      }
+
       if (changed) {
         scheduleSave();
         scheduleRefresh();
@@ -1119,10 +1145,120 @@
           overrides?.pageSize,
           state.itemGroupListRequest?.data?.pageSize,
           state.wishlistRequestTemplates['mtop.aliexpress.wishlist.itemgroup.list']?.data?.pageSize,
+          getFallbackItemGroupListRequestData()?.pageSize,
           CONFIG.itemGroupListFallbackPageSize,
         )
       ) || CONFIG.itemGroupListFallbackPageSize
     );
+  }
+
+  function getFallbackItemGroupListRequestData() {
+    const candidates = [
+      state.wishlistRequestTemplates['mtop.ae.wishlist.allitems.render']?.data,
+      state.wishlistRequestTemplates['mtop.ae.wishlist.mylist.render']?.data,
+    ];
+
+    for (const candidate of candidates) {
+      if (!candidate || typeof candidate !== 'object') continue;
+
+      const locale = cleanText(candidate.locale);
+      const shipToCountry = cleanText(candidate.shipToCountry);
+      const deviceType = cleanText(candidate.deviceType) || 'PC';
+      const lang = cleanText(candidate._lang);
+      const currency = cleanText(candidate._currency);
+
+      if (!locale || !shipToCountry || !lang || !currency) continue;
+
+      return {
+        pageNum: 1,
+        pageSize: CONFIG.preferredMoveDialogPageSize,
+        locale,
+        shipToCountry,
+        deviceType,
+        _lang: lang,
+        _currency: currency,
+        wishGroupId: null,
+        onlyGroup: true,
+      };
+    }
+
+    return null;
+  }
+
+  function scheduleBackgroundItemGroupHydration(delayMs = CONFIG.backgroundItemGroupHydrationDelayMs) {
+    if (!CONFIG.backgroundItemGroupHydration) return;
+    if (state.backgroundItemGroupHydrationTimer) return;
+
+    state.backgroundItemGroupHydrationTimer = window.setTimeout(() => {
+      state.backgroundItemGroupHydrationTimer = 0;
+      runBackgroundItemGroupHydration();
+    }, delayMs);
+  }
+
+  function runBackgroundItemGroupHydration() {
+    runWhenBrowserIdle(() => {
+      hydrateItemGroupListsInBackground().catch(() => {});
+    }, 1500);
+  }
+
+  async function hydrateItemGroupListsInBackground(options = {}) {
+    const { force = false } = options;
+
+    if (!force && !shouldHydrateItemGroupListsInBackground()) {
+      return { started: false, reason: 'not-needed' };
+    }
+
+    const request = buildItemGroupListRequest(1, {
+      pageSize: CONFIG.preferredMoveDialogPageSize,
+    });
+
+    if (!request) {
+      state.backgroundItemGroupHydrationAttempts += 1;
+
+      if (state.backgroundItemGroupHydrationAttempts < CONFIG.backgroundItemGroupHydrationMaxAttempts) {
+        scheduleBackgroundItemGroupHydration(CONFIG.backgroundItemGroupHydrationRetryDelayMs);
+      }
+
+      return { started: false, reason: 'request-unavailable' };
+    }
+
+    state.backgroundItemGroupHydrationAttempts = 0;
+    const result = await fetchAllItemGroupPages({
+      pageSize: CONFIG.preferredMoveDialogPageSize,
+    });
+
+    return {
+      started: true,
+      reason: 'hydrated',
+      ...result,
+    };
+  }
+
+  function shouldHydrateItemGroupListsInBackground() {
+    const customGroupEntries = Object.entries(state.groups)
+      .filter(([groupId, group]) => (
+        groupId !== DEFAULT_GROUP_ID &&
+        !group?.synthetic &&
+        cleanText(group?.name)
+      ));
+    const customGroupCount = customGroupEntries.length;
+    const totalCount = toFiniteOrNull(state.itemGroupListTotalCount);
+    const hydratedAt = toFiniteOrNull(state.itemGroupListHydratedAt);
+
+    if (customGroupCount === 0) return true;
+    if (totalCount != null && customGroupCount < totalCount) return true;
+    if (hydratedAt == null) return true;
+
+    return Date.now() - hydratedAt > CONFIG.backgroundItemGroupHydrationStaleMs;
+  }
+
+  function runWhenBrowserIdle(callback, timeout = 1000) {
+    if (typeof window.requestIdleCallback === 'function') {
+      window.requestIdleCallback(() => callback(), { timeout });
+      return;
+    }
+
+    window.setTimeout(callback, 0);
   }
 
   function extractRequestDataPayload(body) {
@@ -1786,6 +1922,14 @@
       if (typeof parsed.pageType === 'string') {
         state.pageType = parsed.pageType;
       }
+
+      if (Number.isFinite(parsed.itemGroupListTotalCount)) {
+        state.itemGroupListTotalCount = parsed.itemGroupListTotalCount;
+      }
+
+      if (Number.isFinite(parsed.itemGroupListHydratedAt)) {
+        state.itemGroupListHydratedAt = parsed.itemGroupListHydratedAt;
+      }
     } catch (_) {}
   }
 
@@ -1803,6 +1947,8 @@
           nextPaletteSlot: state.nextPaletteSlot,
           totalCount: state.totalCount,
           pageType: state.pageType,
+          itemGroupListTotalCount: state.itemGroupListTotalCount,
+          itemGroupListHydratedAt: state.itemGroupListHydratedAt,
           savedAt: Date.now(),
         };
         localStorage.setItem(CACHE_KEY, JSON.stringify(payload));
