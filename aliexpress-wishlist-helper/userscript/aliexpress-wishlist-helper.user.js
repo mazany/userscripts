@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AliExpress Wishlist Helper (Default Wishlist Filter)
 // @namespace    https://userscripts.mazy.cc/
-// @version      0.6.15
+// @version      0.6.17
 // @description  Adds clickable wishlist badges, filters, edit-mode helpers, and move-dialog enhancements to AliExpress wishlist management.
 // @author       mazy
 // @homepageURL  https://github.com/mazany/userscripts/tree/main/aliexpress-wishlist-helper
@@ -46,6 +46,9 @@
     moveDialogAutoLoadDelayMs: 450,
     moveDialogAutoLoadMaxRounds: 8,
     moveDialogAutoLoadSpacerPx: 160,
+
+    debugWishlistApiTracing: true,
+    debugWishlistApiTraceLimit: 40,
   };
 
   const FILTERS = {
@@ -78,7 +81,7 @@
 
   const state = {
     items: Object.create(null),              // itemId -> { g, f, c, m }
-    groups: Object.create(null),             // groupId -> { name, itemCount, synthetic? }
+    groups: Object.create(null),             // groupId -> { name, itemCount, visibility?, synthetic? }
     customCountsByName: Object.create(null), // name -> itemCount
     paletteSlots: Object.create(null),       // groupId -> stable palette slot
     nextPaletteSlot: 0,
@@ -99,6 +102,9 @@
       loadedCount: 0,
     },
     moveDialogContext: null,                 // { currentGroupId: string|null, selectedItemIds: string[] }
+    itemGroupListRequest: null,              // last observed itemgroup.list request template
+    wishlistRequestTemplates: Object.create(null),
+    wishlistApiTrace: [],
     modalObserver: null,
     moveDialogAutoLoadRunning: false,
     moveDialogAutoLoadQueued: false,
@@ -119,6 +125,7 @@
 
   loadCache();
   installNetworkHooks();
+  installDebugBridge();
   installGlobalClickTracker();
   initWhenReady();
 
@@ -394,18 +401,39 @@
     hookXHR();
   }
 
+  function installDebugBridge() {
+    window.__aeWhDebug = {
+      getWishlistApiTrace: () => state.wishlistApiTrace.slice(),
+      clearWishlistApiTrace: () => {
+        state.wishlistApiTrace = [];
+      },
+      getWishlistRequestTemplates: () => ({ ...state.wishlistRequestTemplates }),
+      getLastItemGroupListRequest: () => state.itemGroupListRequest,
+    };
+  }
+
   function hookFetch() {
     if (typeof window.fetch !== 'function') return;
 
     const originalFetch = window.fetch;
     window.fetch = async function (...args) {
       const url = extractUrlFromFetchArgs(args);
+      const traceEntry = captureWishlistRequest(
+        url,
+        args?.[1]?.method || 'GET',
+        args?.[1]?.body ?? null,
+        getCallStack(),
+        'fetch'
+      );
 
       if (!isRelevantWishlistUrl(url)) {
-        return originalFetch.apply(this, args);
+        const response = await originalFetch.apply(this, args);
+        captureWishlistResponse(traceEntry, response);
+        return response;
       }
 
       const response = await originalFetch.apply(this, args);
+      captureWishlistResponse(traceEntry, response);
 
       try {
         response.clone().text()
@@ -422,17 +450,42 @@
     const originalSend = XMLHttpRequest.prototype.send;
 
     XMLHttpRequest.prototype.open = function (method, url, ...rest) {
+      this.__aeWhMethod = method;
       this.__aeWhUrl = url;
       return originalOpen.call(this, method, url, ...rest);
     };
 
     XMLHttpRequest.prototype.send = function (...args) {
+      const traceEntry = captureWishlistRequest(
+        this.__aeWhUrl,
+        this.__aeWhMethod,
+        args?.[0] ?? null,
+        getCallStack(),
+        'xhr'
+      );
+
+      if (traceEntry) {
+        this.__aeWhTraceEntry = traceEntry;
+      }
+
       if (isRelevantWishlistUrl(this.__aeWhUrl)) {
         this.addEventListener('load', function () {
           try {
             if (this.responseType && this.responseType !== '' && this.responseType !== 'text') return;
             const url = this.responseURL || this.__aeWhUrl;
             processNetworkPayload(url, this.responseText);
+          } catch (_) {}
+        });
+      }
+
+      if (traceEntry) {
+        this.addEventListener('load', function () {
+          try {
+            traceEntry.status = this.status;
+            traceEntry.responseUrl = this.responseURL || this.__aeWhUrl || '';
+            if (this.responseType === '' || this.responseType === 'text') {
+              traceEntry.responsePreview = String(this.responseText || '').slice(0, 400);
+            }
           } catch (_) {}
         });
       }
@@ -578,9 +631,113 @@
       const url = new URL(rawUrl, location.href);
       const api = (url.searchParams.get('api') || '').toLowerCase();
       return api === 'mtop.ae.wishlist.allitems.render' ||
-             api === 'mtop.ae.wishlist.mylist.render';
+             api === 'mtop.ae.wishlist.mylist.render' ||
+             api === 'mtop.aliexpress.wishlist.itemgroup.list';
     } catch (_) {
       return false;
+    }
+  }
+
+  function isTrackedWishlistApi(api) {
+    return typeof api === 'string' && api.includes('wishlist');
+  }
+
+  function captureWishlistRequest(rawUrl, method, body, stack = '', source = '') {
+    const api = getApiName(rawUrl);
+    if (!isTrackedWishlistApi(api)) return null;
+
+    const data = extractRequestDataPayload(body);
+    const traceEntry = {
+      api,
+      source,
+      method: typeof method === 'string' ? method.toUpperCase() : '',
+      url: rawUrl,
+      data,
+      stack,
+      capturedAt: Date.now(),
+      status: null,
+      responseUrl: '',
+      responsePreview: '',
+    };
+
+    pushWishlistApiTrace(traceEntry);
+    rememberWishlistRequestTemplate(api, rawUrl, method, source, data);
+
+    if (api === 'mtop.aliexpress.wishlist.itemgroup.list' && data && typeof data === 'object') {
+      state.itemGroupListRequest = {
+        source,
+        method: typeof method === 'string' ? method.toUpperCase() : '',
+        api,
+        url: rawUrl,
+        data,
+        capturedAt: Date.now(),
+      };
+    }
+
+    return traceEntry;
+  }
+
+  function captureWishlistResponse(traceEntry, response) {
+    if (!traceEntry || !response) return;
+
+    try {
+      traceEntry.status = response.status;
+      traceEntry.responseUrl = response.url || traceEntry.url;
+      response.clone().text()
+        .then(text => {
+          traceEntry.responsePreview = String(text || '').slice(0, 400);
+        })
+        .catch(() => {});
+    } catch (_) {}
+  }
+
+  function rememberWishlistRequestTemplate(api, rawUrl, method, source, data) {
+    state.wishlistRequestTemplates[api] = {
+      method: typeof method === 'string' ? method.toUpperCase() : '',
+      source,
+      api,
+      url: rawUrl,
+      data,
+      capturedAt: Date.now(),
+    };
+  }
+
+  function pushWishlistApiTrace(entry) {
+    if (!CONFIG.debugWishlistApiTracing) return;
+
+    state.wishlistApiTrace.push(entry);
+    if (state.wishlistApiTrace.length > CONFIG.debugWishlistApiTraceLimit) {
+      state.wishlistApiTrace.splice(0, state.wishlistApiTrace.length - CONFIG.debugWishlistApiTraceLimit);
+    }
+  }
+
+  function getCallStack() {
+    try {
+      return new Error().stack || '';
+    } catch (_) {
+      return '';
+    }
+  }
+
+  function extractRequestDataPayload(body) {
+    if (!body) return null;
+
+    let rawData = '';
+
+    if (typeof body === 'string') {
+      rawData = new URLSearchParams(body).get('data') || '';
+    } else if (body instanceof URLSearchParams) {
+      rawData = body.get('data') || '';
+    } else {
+      return null;
+    }
+
+    if (!rawData) return null;
+
+    try {
+      return JSON.parse(rawData);
+    } catch (_) {
+      return null;
     }
   }
 
@@ -935,6 +1092,10 @@
       }
     }
 
+    if (api === 'mtop.aliexpress.wishlist.itemgroup.list') {
+      changed = processItemGroupListPayload(json, payload) || changed;
+    }
+
     return changed;
   }
 
@@ -1005,27 +1166,97 @@
       const fields = node.fields || {};
       if (fields.groupId == null) continue;
 
-      const groupId = String(fields.groupId);
-      const prev = state.groups[groupId] || {};
-      const next = {
-        name: cleanText(fields.name) || prev.name || `List ${groupId}`,
-        itemCount: Number.isFinite(fields.itemCount) ? fields.itemCount : prev.itemCount ?? null,
-        synthetic: false,
-      };
-
-      if (!shallowEqual(prev, next)) {
-        state.groups[groupId] = next;
-        changed = true;
-      }
-
-      if (next.name && Number.isFinite(next.itemCount)) {
-        if (rememberCustomCountByName(next.name, next.itemCount)) {
-          changed = true;
-        }
-      }
+      changed = rememberGroupMeta(String(fields.groupId), {
+        name: fields.name,
+        itemCount: fields.itemCount,
+      }) || changed;
     }
 
     return changed;
+  }
+
+  function processItemGroupListPayload(json, payload) {
+    let changed = false;
+    const seenGroupIds = new Set();
+    const roots = [payload, json?.data, json];
+
+    for (const root of roots) {
+      const entries = extractGroupEntries(root);
+      for (const entry of entries) {
+        if (!entry?.groupId || seenGroupIds.has(entry.groupId)) continue;
+        seenGroupIds.add(entry.groupId);
+
+        changed = rememberGroupMeta(entry.groupId, entry) || changed;
+      }
+
+      if (seenGroupIds.size) break;
+    }
+
+    return changed;
+  }
+
+  function rememberGroupMeta(groupId, fields) {
+    if (!groupId) return false;
+
+    const prev = state.groups[groupId] || {};
+    const next = {
+      name: cleanText(fields?.name) || prev.name || `List ${groupId}`,
+      itemCount: toFiniteOrNull(
+        firstDefined(fields?.itemCount, fields?.count, fields?.itemNum, fields?.goodsNum)
+      ) ?? prev.itemCount ?? null,
+      visibility: cleanVisibility(
+        firstDefined(fields?.visibility, fields?.privacy, fields?.groupVisibility, fields?.groupType)
+      ) || prev.visibility || 'unknown',
+      synthetic: false,
+    };
+
+    let changed = false;
+    if (!shallowEqual(prev, next)) {
+      state.groups[groupId] = next;
+      changed = true;
+    }
+
+    if (next.name && Number.isFinite(next.itemCount)) {
+      changed = rememberCustomCountByName(next.name, next.itemCount) || changed;
+    }
+
+    return changed;
+  }
+
+  function extractGroupEntries(root) {
+    const entries = [];
+    const seen = new Set();
+
+    function visit(value, depth) {
+      if (!value || depth > 6) return;
+
+      if (Array.isArray(value)) {
+        value.forEach(item => visit(item, depth + 1));
+        return;
+      }
+
+      if (typeof value !== 'object') return;
+      if (seen.has(value)) return;
+      seen.add(value);
+
+      const groupId = firstDefined(value.groupId, value.wishGroupId);
+      const name = firstDefined(value.name, value.groupName, value.title, value.wishGroupName);
+      if (groupId != null && typeof name === 'string' && cleanText(name)) {
+        entries.push({
+          groupId: String(groupId),
+          name,
+          itemCount: firstDefined(value.itemCount, value.count, value.itemNum, value.goodsNum),
+          visibility: firstDefined(value.visibility, value.privacy, value.groupVisibility, value.groupType),
+        });
+      }
+
+      for (const child of Object.values(value)) {
+        visit(child, depth + 1);
+      }
+    }
+
+    visit(root, 0);
+    return entries;
   }
 
   function rememberCustomCountByName(name, count) {
@@ -1046,6 +1277,26 @@
   function toNumberOrZero(value) {
     const num = Number(value);
     return Number.isFinite(num) ? num : 0;
+  }
+
+  function toFiniteOrNull(value) {
+    const num = Number(value);
+    return Number.isFinite(num) ? num : null;
+  }
+
+  function firstDefined(...values) {
+    for (const value of values) {
+      if (value !== undefined && value !== null) return value;
+    }
+    return null;
+  }
+
+  function cleanVisibility(value) {
+    const normalized = cleanText(String(value || '')).toLowerCase();
+    if (!normalized) return '';
+    if (normalized === '1' || normalized.includes('private')) return 'private';
+    if (normalized === '0' || normalized.includes('public')) return 'public';
+    return normalized;
   }
 
   function cleanText(value) {

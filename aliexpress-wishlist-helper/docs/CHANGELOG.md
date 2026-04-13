@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.6.17 - 2026-04-13
+
+- added temporary wishlist API tracing on the experimental move-dialog hydration branch, including captured request templates, call stacks, and response previews for wishlist-related fetch/XHR requests
+- exposed the tracing data through `window.__aeWhDebug` so the move flow endpoint can be identified from one manual dialog interaction
+
+## 0.6.16 - 2026-04-13
+
+- added network support for `mtop.aliexpress.wishlist.itemgroup.list`, including request template capture for future API-driven move-dialog hydration
+- added defensive parsing of group-list responses so cached group names, counts, and visibility can be refreshed from the dialog data source without relying on native scroll-triggered pagination
+
 ## 0.6.15 - 2026-04-13
 
 - centralized wishlist page-mode detection into a single helper so toolbar visibility no longer depends on scattered pathname, pageType, and tab-text checks
