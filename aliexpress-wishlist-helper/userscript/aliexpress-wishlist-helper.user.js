@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AliExpress Wishlist Helper (Default Wishlist Filter)
 // @namespace    https://userscripts.mazy.cc/
-// @version      0.6.29
+// @version      0.6.30
 // @description  Adds clickable wishlist badges, filters, edit-mode helpers, and move-dialog enhancements to AliExpress wishlist management.
 // @author       mazy
 // @homepageURL  https://github.com/mazany/userscripts/tree/main/aliexpress-wishlist-helper
@@ -54,9 +54,6 @@
     backgroundItemGroupHydrationMaxAttempts: 6,
     backgroundItemGroupHydrationStaleMs: 1000 * 60 * 60 * 6,
 
-    debugWishlistApiTracing: true,
-    debugWishlistApiTraceLimit: 40,
-    debugRequestJsonTraceLimit: 30,
   };
 
   const FILTERS = {
@@ -110,17 +107,12 @@
       loadedCount: 0,
     },
     moveDialogContext: null,                 // { currentGroupId: string|null, selectedItemIds: string[] }
-    itemGroupListRequest: null,              // last observed itemgroup.list request template
+    itemGroupListRequest: null,              // last observed itemgroup.list request payload
     itemGroupListTotalCount: null,
     itemGroupListHydratedAt: null,
     itemGroupListHydrationPromise: null,
     wishlistRequestTemplates: Object.create(null),
-    wishlistApiTrace: [],
-    requestJsonOwners: [],
-    requestJsonCalls: [],
-    nextDebugObjectId: 1,
     mtopItemGroupListPatchInstalled: false,
-    lastAdjustedItemGroupListRequest: null,
     backgroundItemGroupHydrationTimer: 0,
     backgroundItemGroupHydrationAttempts: 0,
     modalObserver: null,
@@ -142,9 +134,7 @@
   };
 
   loadCache();
-  installRequestJsonHooks();
   installNetworkHooks();
-  installDebugBridge();
   installGlobalClickTracker();
   initWhenReady();
 
@@ -474,55 +464,18 @@
 
     const nextPageSize = Math.max(CONFIG.preferredMoveDialogPageSize, 1);
     const parsedData = normalizeItemGroupListRequestData(params.data);
-    if (!parsedData || typeof parsedData !== 'object') {
-      state.lastAdjustedItemGroupListRequest = {
-        adjusted: false,
-        reason: 'unparseable-data',
-        capturedAt: Date.now(),
-        api: params.api,
-        dataType: typeof params.data,
-        dataKeys: params.data && typeof params.data === 'object' ? Object.keys(params.data).slice(0, 12) : [],
-        rawData: typeof params.data === 'string' ? params.data.slice(0, 400) : null,
-      };
-      return params;
-    }
+    if (!parsedData || typeof parsedData !== 'object') return params;
 
     const previousPageSize = toFiniteOrNull(parsedData.pageSize);
-    if (previousPageSize != null && previousPageSize >= nextPageSize) {
-      state.lastAdjustedItemGroupListRequest = {
-        adjusted: false,
-        reason: 'page-size-already-large-enough',
-      capturedAt: Date.now(),
-      api: params.api,
-      beforePageSize: previousPageSize,
-      afterPageSize: previousPageSize,
-      dataType: typeof params.data,
-      data: { ...parsedData },
-    };
-    return params;
-  }
+    if (previousPageSize != null && previousPageSize >= nextPageSize) return params;
 
-    const adjustedParams = {
+    return {
       ...params,
       data: JSON.stringify({
         ...parsedData,
         pageSize: nextPageSize,
       }),
     };
-
-    state.lastAdjustedItemGroupListRequest = {
-      adjusted: true,
-      reason: 'page-size-upgraded',
-      capturedAt: Date.now(),
-      api: params.api,
-      beforePageSize: previousPageSize,
-      afterPageSize: nextPageSize,
-      dataType: typeof params.data,
-      beforeData: { ...parsedData },
-      afterData: { ...parsedData, pageSize: nextPageSize },
-    };
-
-    return adjustedParams;
   }
 
   function normalizeItemGroupListRequestData(data) {
@@ -530,124 +483,6 @@
     if (typeof data === 'string') return parsePossiblyWrappedJson(data);
     if (typeof data === 'object') return data;
     return null;
-  }
-
-  function installDebugBridge() {
-    window.__aeWhDebug = {
-      getWishlistApiTrace: () => state.wishlistApiTrace.slice(),
-      clearWishlistApiTrace: () => {
-        state.wishlistApiTrace = [];
-      },
-      getWishlistRequestTemplates: () => ({ ...state.wishlistRequestTemplates }),
-      getLastItemGroupListRequest: () => state.itemGroupListRequest,
-      findRequestJsonOwners,
-      getRequestJsonOwners: () => state.requestJsonOwners.slice(),
-      getRequestJsonCalls: () => state.requestJsonCalls.slice(),
-      clearRequestJsonCalls: () => {
-        state.requestJsonCalls = [];
-      },
-      getMtopItemGroupListPatchStatus: () => ({
-        installed: state.mtopItemGroupListPatchInstalled,
-        preferredPageSize: CONFIG.preferredMoveDialogPageSize,
-        hasMtop: !!window.lib?.mtop,
-        hasRequest: typeof window.lib?.mtop?.request === 'function',
-        hasH5Request: typeof window.lib?.mtop?.H5Request === 'function',
-        requestPatched: !!window.lib?.mtop?.request?.__aeWhItemGroupPatch,
-        h5RequestPatched: !!window.lib?.mtop?.H5Request?.__aeWhItemGroupPatch,
-      }),
-      getLastAdjustedItemGroupListRequest: () => state.lastAdjustedItemGroupListRequest
-        ? JSON.parse(JSON.stringify(state.lastAdjustedItemGroupListRequest))
-        : null,
-      getBackgroundItemGroupHydrationStatus: () => ({
-        enabled: CONFIG.backgroundItemGroupHydration,
-        attempts: state.backgroundItemGroupHydrationAttempts,
-        scheduled: !!state.backgroundItemGroupHydrationTimer,
-        hydratedAt: state.itemGroupListHydratedAt,
-        totalCount: state.itemGroupListTotalCount,
-      }),
-      buildItemGroupListRequest,
-      fetchItemGroupPage,
-      fetchAllItemGroupPages,
-      hydrateItemGroupListsInBackground: () => hydrateItemGroupListsInBackground({ force: true }),
-    };
-  }
-
-  function installRequestJsonHooks() {
-    if (window.__aeWhRequestJsonHooked) return;
-    window.__aeWhRequestJsonHooked = true;
-
-    const originalDefineProperty = Object.defineProperty;
-    Object.defineProperty = function (target, prop, descriptor) {
-      if (prop === '__requestJSON' && descriptor && typeof descriptor.value === 'function') {
-        descriptor = {
-          ...descriptor,
-          value: wrapRequestJsonFunction(target, descriptor.value, 'defineProperty'),
-        };
-      }
-      return originalDefineProperty.call(Object, target, prop, descriptor);
-    };
-
-    const originalReflectDefineProperty = Reflect.defineProperty;
-    Reflect.defineProperty = function (target, prop, descriptor) {
-      if (prop === '__requestJSON' && descriptor && typeof descriptor.value === 'function') {
-        descriptor = {
-          ...descriptor,
-          value: wrapRequestJsonFunction(target, descriptor.value, 'reflect.defineProperty'),
-        };
-      }
-      return originalReflectDefineProperty.call(Reflect, target, prop, descriptor);
-    };
-
-    originalDefineProperty(Object.prototype, '__requestJSON', {
-      configurable: true,
-      enumerable: false,
-      get() {
-        return undefined;
-      },
-      set(value) {
-        originalDefineProperty(this, '__requestJSON', {
-          configurable: true,
-          enumerable: false,
-          writable: true,
-          value: typeof value === 'function'
-            ? wrapRequestJsonFunction(this, value, 'prototype-setter')
-            : value,
-        });
-      },
-    });
-  }
-
-  function hookFetch() {
-    if (typeof window.fetch !== 'function') return;
-
-    const originalFetch = window.fetch;
-    window.fetch = function (...args) {
-      const url = extractUrlFromFetchArgs(args);
-
-      if (!isRelevantWishlistUrl(url)) {
-        return originalFetch.apply(this, args);
-      }
-
-      const traceEntry = captureWishlistRequest(
-        url,
-        args?.[1]?.method || 'GET',
-        args?.[1]?.body ?? null,
-        getCallStack(),
-        'fetch'
-      );
-
-      return originalFetch.apply(this, args).then(response => {
-        captureWishlistResponse(traceEntry, response);
-
-        try {
-          response.clone().text()
-            .then(text => processNetworkPayload(url, text))
-            .catch(() => {});
-        } catch (_) {}
-
-        return response;
-      });
-    };
   }
 
   function hookXHR() {
@@ -661,17 +496,11 @@
     };
 
     XMLHttpRequest.prototype.send = function (...args) {
-      const traceEntry = captureWishlistRequest(
+      observeWishlistRequest(
         this.__aeWhUrl,
         this.__aeWhMethod,
-        args?.[0] ?? null,
-        getCallStack(),
-        'xhr'
+        args?.[0] ?? null
       );
-
-      if (traceEntry) {
-        this.__aeWhTraceEntry = traceEntry;
-      }
 
       if (isRelevantWishlistUrl(this.__aeWhUrl)) {
         this.addEventListener('load', function () {
@@ -679,18 +508,6 @@
             if (this.responseType && this.responseType !== '' && this.responseType !== 'text') return;
             const url = this.responseURL || this.__aeWhUrl;
             processNetworkPayload(url, this.responseText);
-          } catch (_) {}
-        });
-      }
-
-      if (traceEntry) {
-        this.addEventListener('load', function () {
-          try {
-            traceEntry.status = this.status;
-            traceEntry.responseUrl = this.responseURL || this.__aeWhUrl || '';
-            if (this.responseType === '' || this.responseType === 'text') {
-              traceEntry.responsePreview = String(this.responseText || '').slice(0, 400);
-            }
           } catch (_) {}
         });
       }
@@ -822,13 +639,6 @@
     return null;
   }
 
-  function extractUrlFromFetchArgs(args) {
-    const input = args?.[0];
-    if (typeof input === 'string') return input;
-    if (input && typeof input.url === 'string') return input.url;
-    return '';
-  }
-
   function isRelevantWishlistUrl(rawUrl) {
     if (!rawUrl) return false;
 
@@ -843,34 +653,15 @@
     }
   }
 
-  function isTrackedWishlistApi(api) {
-    return typeof api === 'string' && api.includes('wishlist');
-  }
-
-  function captureWishlistRequest(rawUrl, method, body, stack = '', source = '') {
+  function observeWishlistRequest(rawUrl, method, body) {
     const api = getApiName(rawUrl);
-    if (!isTrackedWishlistApi(api)) return null;
+    if (!api || !api.includes('wishlist')) return;
 
     const data = extractRequestDataPayload(body);
-    const traceEntry = {
-      api,
-      source,
-      method: typeof method === 'string' ? method.toUpperCase() : '',
-      url: rawUrl,
-      data,
-      stack,
-      capturedAt: Date.now(),
-      status: null,
-      responseUrl: '',
-      responsePreview: '',
-    };
-
-    pushWishlistApiTrace(traceEntry);
-    rememberWishlistRequestTemplate(api, rawUrl, method, source, data);
+    rememberWishlistRequestTemplate(api, rawUrl, method, data);
 
     if (api === 'mtop.aliexpress.wishlist.itemgroup.list' && data && typeof data === 'object') {
       state.itemGroupListRequest = {
-        source,
         method: typeof method === 'string' ? method.toUpperCase() : '',
         api,
         url: rawUrl,
@@ -878,159 +669,16 @@
         capturedAt: Date.now(),
       };
     }
-
-    return traceEntry;
   }
 
-  function captureWishlistResponse(traceEntry, response) {
-    if (!traceEntry || !response) return;
-
-    try {
-      traceEntry.status = response.status;
-      traceEntry.responseUrl = response.url || traceEntry.url;
-      response.clone().text()
-        .then(text => {
-          traceEntry.responsePreview = String(text || '').slice(0, 400);
-        })
-        .catch(() => {});
-    } catch (_) {}
-  }
-
-  function rememberWishlistRequestTemplate(api, rawUrl, method, source, data) {
+  function rememberWishlistRequestTemplate(api, rawUrl, method, data) {
     state.wishlistRequestTemplates[api] = {
       method: typeof method === 'string' ? method.toUpperCase() : '',
-      source,
       api,
       url: rawUrl,
       data,
       capturedAt: Date.now(),
     };
-  }
-
-  function pushWishlistApiTrace(entry) {
-    if (!CONFIG.debugWishlistApiTracing) return;
-
-    state.wishlistApiTrace.push(entry);
-    if (state.wishlistApiTrace.length > CONFIG.debugWishlistApiTraceLimit) {
-      state.wishlistApiTrace.splice(0, state.wishlistApiTrace.length - CONFIG.debugWishlistApiTraceLimit);
-    }
-  }
-
-  function wrapRequestJsonFunction(owner, fn, installVia) {
-    if (typeof fn !== 'function') return fn;
-    if (fn.__aeWhWrappedRequestJson) return fn;
-
-    const ownerInfo = ensureRequestJsonOwner(owner, installVia);
-
-    function wrappedRequestJson(...args) {
-      state.requestJsonCalls.push({
-        ownerId: ownerInfo.id,
-        ownerLabel: ownerInfo.label,
-        installVia,
-        args: args.slice(0, 4).map(serializeDebugValue),
-        stack: getCallStack(),
-        calledAt: Date.now(),
-      });
-
-      if (state.requestJsonCalls.length > CONFIG.debugRequestJsonTraceLimit) {
-        state.requestJsonCalls.splice(0, state.requestJsonCalls.length - CONFIG.debugRequestJsonTraceLimit);
-      }
-
-      return fn.apply(this, args);
-    }
-
-    wrappedRequestJson.__aeWhWrappedRequestJson = true;
-    wrappedRequestJson.__aeWhOriginalRequestJson = fn;
-    return wrappedRequestJson;
-  }
-
-  function ensureRequestJsonOwner(owner, installVia) {
-    if (owner && typeof owner === 'object') {
-      if (!Object.prototype.hasOwnProperty.call(owner, '__aeWhRequestJsonOwnerId')) {
-        Object.defineProperty(owner, '__aeWhRequestJsonOwnerId', {
-          configurable: true,
-          enumerable: false,
-          writable: true,
-          value: state.nextDebugObjectId++,
-        });
-
-        const info = {
-          id: owner.__aeWhRequestJsonOwnerId,
-          label: describeDebugOwner(owner),
-          installVia,
-          keys: Object.keys(owner).slice(0, 12),
-          createdAt: Date.now(),
-        };
-        state.requestJsonOwners.push(info);
-      }
-
-      return state.requestJsonOwners.find(entry => entry.id === owner.__aeWhRequestJsonOwnerId) || {
-        id: owner.__aeWhRequestJsonOwnerId,
-        label: describeDebugOwner(owner),
-        installVia,
-      };
-    }
-
-    return {
-      id: 0,
-      label: `non-object:${typeof owner}`,
-      installVia,
-    };
-  }
-
-  function describeDebugOwner(owner) {
-    try {
-      const ctor = owner?.constructor?.name || 'Object';
-      const keys = Object.keys(owner || {}).slice(0, 5).join(',');
-      return keys ? `${ctor}(${keys})` : ctor;
-    } catch (_) {
-      return 'Object';
-    }
-  }
-
-  function serializeDebugValue(value) {
-    if (value == null) return value;
-    if (typeof value === 'string') return value.slice(0, 400);
-    if (typeof value === 'number' || typeof value === 'boolean') return value;
-    if (Array.isArray(value)) return value.slice(0, 8).map(serializeDebugValue);
-
-    if (typeof value === 'object') {
-      const output = {};
-      for (const key of Object.keys(value).slice(0, 12)) {
-        output[key] = serializeDebugValue(value[key]);
-      }
-      return output;
-    }
-
-    return String(value);
-  }
-
-  function getCallStack() {
-    try {
-      return new Error().stack || '';
-    } catch (_) {
-      return '';
-    }
-  }
-
-  function findRequestJsonOwners() {
-    const matches = [];
-
-    for (const [key, value] of Object.entries(window)) {
-      if (!value || (typeof value !== 'object' && typeof value !== 'function')) continue;
-
-      try {
-        if (typeof value.__requestJSON === 'function') {
-          matches.push({
-            key,
-            type: typeof value,
-            ownKeys: Object.keys(value).slice(0, 12),
-          });
-        }
-      } catch (_) {}
-    }
-
-    return matches;
   }
 
   function buildItemGroupListRequest(pageNum = 1, overrides = {}) {

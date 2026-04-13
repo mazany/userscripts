@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.30 - 2026-04-13
+
+- removed experimental debug bridges and tracing helpers after validating the move-dialog hydration approach, keeping only the production code paths for XHR template capture, native `itemgroup.list` page-size patching, and background metadata hydration
+
 ## 0.6.29 - 2026-04-13
 
 - disabled the global `fetch` hook on the experimental branch and now rely on XHR interception only, because any global `window.fetch` wrapper continued to attribute unrelated third-party request failures to the userscript in DevTools
