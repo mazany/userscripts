@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AliExpress Wishlist Helper (Default Wishlist Filter)
 // @namespace    https://userscripts.mazy.cc/
-// @version      0.6.17
+// @version      0.6.26
 // @description  Adds clickable wishlist badges, filters, edit-mode helpers, and move-dialog enhancements to AliExpress wishlist management.
 // @author       mazy
 // @homepageURL  https://github.com/mazany/userscripts/tree/main/aliexpress-wishlist-helper
@@ -46,9 +46,12 @@
     moveDialogAutoLoadDelayMs: 450,
     moveDialogAutoLoadMaxRounds: 8,
     moveDialogAutoLoadSpacerPx: 160,
+    preferredMoveDialogPageSize: 16,
+    itemGroupListFallbackPageSize: 10,
 
     debugWishlistApiTracing: true,
     debugWishlistApiTraceLimit: 40,
+    debugRequestJsonTraceLimit: 30,
   };
 
   const FILTERS = {
@@ -103,8 +106,15 @@
     },
     moveDialogContext: null,                 // { currentGroupId: string|null, selectedItemIds: string[] }
     itemGroupListRequest: null,              // last observed itemgroup.list request template
+    itemGroupListTotalCount: null,
+    itemGroupListHydrationPromise: null,
     wishlistRequestTemplates: Object.create(null),
     wishlistApiTrace: [],
+    requestJsonOwners: [],
+    requestJsonCalls: [],
+    nextDebugObjectId: 1,
+    mtopItemGroupListPatchInstalled: false,
+    lastAdjustedItemGroupListRequest: null,
     modalObserver: null,
     moveDialogAutoLoadRunning: false,
     moveDialogAutoLoadQueued: false,
@@ -124,6 +134,7 @@
   };
 
   loadCache();
+  installRequestJsonHooks();
   installNetworkHooks();
   installDebugBridge();
   installGlobalClickTracker();
@@ -132,6 +143,7 @@
   function initWhenReady() {
     const start = () => {
       injectStyles();
+      installMtopItemGroupListPatch();
       installDomObserver();
       scheduleRefresh();
     };
@@ -401,6 +413,117 @@
     hookXHR();
   }
 
+  function installMtopItemGroupListPatch() {
+    if (state.mtopItemGroupListPatchInstalled) return;
+
+    const tryInstall = () => {
+      const mtop = window.lib?.mtop;
+      if (!mtop) return false;
+
+      let patchedAny = false;
+
+      if (typeof mtop.request === 'function' && !mtop.request.__aeWhItemGroupPatch) {
+        const originalRequest = mtop.request;
+        mtop.request = function patchedMtopRequest(params, success, failure) {
+          return originalRequest.call(this, adjustItemGroupListRequestParams(params), success, failure);
+        };
+        mtop.request.__aeWhItemGroupPatch = true;
+        patchedAny = true;
+      }
+
+      if (typeof mtop.H5Request === 'function' && !mtop.H5Request.__aeWhItemGroupPatch) {
+        const originalH5Request = mtop.H5Request;
+        mtop.H5Request = function patchedMtopH5Request(params, success, failure) {
+          return originalH5Request.call(this, adjustItemGroupListRequestParams(params), success, failure);
+        };
+        mtop.H5Request.__aeWhItemGroupPatch = true;
+        patchedAny = true;
+      }
+
+      if (patchedAny) {
+        state.mtopItemGroupListPatchInstalled = true;
+        return true;
+      }
+
+      return false;
+    };
+
+    if (tryInstall()) return;
+
+    let attempts = 0;
+    const maxAttempts = 120;
+    const timer = window.setInterval(() => {
+      attempts += 1;
+      if (tryInstall() || attempts >= maxAttempts) {
+        window.clearInterval(timer);
+      }
+    }, 250);
+  }
+
+  function adjustItemGroupListRequestParams(params) {
+    if (!params || typeof params !== 'object') return params;
+    if (params.api !== 'mtop.aliexpress.wishlist.itemgroup.list') return params;
+
+    const nextPageSize = Math.max(CONFIG.preferredMoveDialogPageSize, 1);
+    const parsedData = normalizeItemGroupListRequestData(params.data);
+    if (!parsedData || typeof parsedData !== 'object') {
+      state.lastAdjustedItemGroupListRequest = {
+        adjusted: false,
+        reason: 'unparseable-data',
+        capturedAt: Date.now(),
+        api: params.api,
+        dataType: typeof params.data,
+        dataKeys: params.data && typeof params.data === 'object' ? Object.keys(params.data).slice(0, 12) : [],
+        rawData: typeof params.data === 'string' ? params.data.slice(0, 400) : null,
+      };
+      return params;
+    }
+
+    const previousPageSize = toFiniteOrNull(parsedData.pageSize);
+    if (previousPageSize != null && previousPageSize >= nextPageSize) {
+      state.lastAdjustedItemGroupListRequest = {
+        adjusted: false,
+        reason: 'page-size-already-large-enough',
+      capturedAt: Date.now(),
+      api: params.api,
+      beforePageSize: previousPageSize,
+      afterPageSize: previousPageSize,
+      dataType: typeof params.data,
+      data: { ...parsedData },
+    };
+    return params;
+  }
+
+    const adjustedParams = {
+      ...params,
+      data: JSON.stringify({
+        ...parsedData,
+        pageSize: nextPageSize,
+      }),
+    };
+
+    state.lastAdjustedItemGroupListRequest = {
+      adjusted: true,
+      reason: 'page-size-upgraded',
+      capturedAt: Date.now(),
+      api: params.api,
+      beforePageSize: previousPageSize,
+      afterPageSize: nextPageSize,
+      dataType: typeof params.data,
+      beforeData: { ...parsedData },
+      afterData: { ...parsedData, pageSize: nextPageSize },
+    };
+
+    return adjustedParams;
+  }
+
+  function normalizeItemGroupListRequestData(data) {
+    if (!data) return null;
+    if (typeof data === 'string') return parsePossiblyWrappedJson(data);
+    if (typeof data === 'object') return data;
+    return null;
+  }
+
   function installDebugBridge() {
     window.__aeWhDebug = {
       getWishlistApiTrace: () => state.wishlistApiTrace.slice(),
@@ -409,7 +532,73 @@
       },
       getWishlistRequestTemplates: () => ({ ...state.wishlistRequestTemplates }),
       getLastItemGroupListRequest: () => state.itemGroupListRequest,
+      findRequestJsonOwners,
+      getRequestJsonOwners: () => state.requestJsonOwners.slice(),
+      getRequestJsonCalls: () => state.requestJsonCalls.slice(),
+      clearRequestJsonCalls: () => {
+        state.requestJsonCalls = [];
+      },
+      getMtopItemGroupListPatchStatus: () => ({
+        installed: state.mtopItemGroupListPatchInstalled,
+        preferredPageSize: CONFIG.preferredMoveDialogPageSize,
+        hasMtop: !!window.lib?.mtop,
+        hasRequest: typeof window.lib?.mtop?.request === 'function',
+        hasH5Request: typeof window.lib?.mtop?.H5Request === 'function',
+        requestPatched: !!window.lib?.mtop?.request?.__aeWhItemGroupPatch,
+        h5RequestPatched: !!window.lib?.mtop?.H5Request?.__aeWhItemGroupPatch,
+      }),
+      getLastAdjustedItemGroupListRequest: () => state.lastAdjustedItemGroupListRequest
+        ? JSON.parse(JSON.stringify(state.lastAdjustedItemGroupListRequest))
+        : null,
+      buildItemGroupListRequest,
+      fetchItemGroupPage,
+      fetchAllItemGroupPages,
     };
+  }
+
+  function installRequestJsonHooks() {
+    if (window.__aeWhRequestJsonHooked) return;
+    window.__aeWhRequestJsonHooked = true;
+
+    const originalDefineProperty = Object.defineProperty;
+    Object.defineProperty = function (target, prop, descriptor) {
+      if (prop === '__requestJSON' && descriptor && typeof descriptor.value === 'function') {
+        descriptor = {
+          ...descriptor,
+          value: wrapRequestJsonFunction(target, descriptor.value, 'defineProperty'),
+        };
+      }
+      return originalDefineProperty.call(Object, target, prop, descriptor);
+    };
+
+    const originalReflectDefineProperty = Reflect.defineProperty;
+    Reflect.defineProperty = function (target, prop, descriptor) {
+      if (prop === '__requestJSON' && descriptor && typeof descriptor.value === 'function') {
+        descriptor = {
+          ...descriptor,
+          value: wrapRequestJsonFunction(target, descriptor.value, 'reflect.defineProperty'),
+        };
+      }
+      return originalReflectDefineProperty.call(Reflect, target, prop, descriptor);
+    };
+
+    originalDefineProperty(Object.prototype, '__requestJSON', {
+      configurable: true,
+      enumerable: false,
+      get() {
+        return undefined;
+      },
+      set(value) {
+        originalDefineProperty(this, '__requestJSON', {
+          configurable: true,
+          enumerable: false,
+          writable: true,
+          value: typeof value === 'function'
+            ? wrapRequestJsonFunction(this, value, 'prototype-setter')
+            : value,
+        });
+      },
+    });
   }
 
   function hookFetch() {
@@ -711,12 +900,229 @@
     }
   }
 
+  function wrapRequestJsonFunction(owner, fn, installVia) {
+    if (typeof fn !== 'function') return fn;
+    if (fn.__aeWhWrappedRequestJson) return fn;
+
+    const ownerInfo = ensureRequestJsonOwner(owner, installVia);
+
+    function wrappedRequestJson(...args) {
+      state.requestJsonCalls.push({
+        ownerId: ownerInfo.id,
+        ownerLabel: ownerInfo.label,
+        installVia,
+        args: args.slice(0, 4).map(serializeDebugValue),
+        stack: getCallStack(),
+        calledAt: Date.now(),
+      });
+
+      if (state.requestJsonCalls.length > CONFIG.debugRequestJsonTraceLimit) {
+        state.requestJsonCalls.splice(0, state.requestJsonCalls.length - CONFIG.debugRequestJsonTraceLimit);
+      }
+
+      return fn.apply(this, args);
+    }
+
+    wrappedRequestJson.__aeWhWrappedRequestJson = true;
+    wrappedRequestJson.__aeWhOriginalRequestJson = fn;
+    return wrappedRequestJson;
+  }
+
+  function ensureRequestJsonOwner(owner, installVia) {
+    if (owner && typeof owner === 'object') {
+      if (!Object.prototype.hasOwnProperty.call(owner, '__aeWhRequestJsonOwnerId')) {
+        Object.defineProperty(owner, '__aeWhRequestJsonOwnerId', {
+          configurable: true,
+          enumerable: false,
+          writable: true,
+          value: state.nextDebugObjectId++,
+        });
+
+        const info = {
+          id: owner.__aeWhRequestJsonOwnerId,
+          label: describeDebugOwner(owner),
+          installVia,
+          keys: Object.keys(owner).slice(0, 12),
+          createdAt: Date.now(),
+        };
+        state.requestJsonOwners.push(info);
+      }
+
+      return state.requestJsonOwners.find(entry => entry.id === owner.__aeWhRequestJsonOwnerId) || {
+        id: owner.__aeWhRequestJsonOwnerId,
+        label: describeDebugOwner(owner),
+        installVia,
+      };
+    }
+
+    return {
+      id: 0,
+      label: `non-object:${typeof owner}`,
+      installVia,
+    };
+  }
+
+  function describeDebugOwner(owner) {
+    try {
+      const ctor = owner?.constructor?.name || 'Object';
+      const keys = Object.keys(owner || {}).slice(0, 5).join(',');
+      return keys ? `${ctor}(${keys})` : ctor;
+    } catch (_) {
+      return 'Object';
+    }
+  }
+
+  function serializeDebugValue(value) {
+    if (value == null) return value;
+    if (typeof value === 'string') return value.slice(0, 400);
+    if (typeof value === 'number' || typeof value === 'boolean') return value;
+    if (Array.isArray(value)) return value.slice(0, 8).map(serializeDebugValue);
+
+    if (typeof value === 'object') {
+      const output = {};
+      for (const key of Object.keys(value).slice(0, 12)) {
+        output[key] = serializeDebugValue(value[key]);
+      }
+      return output;
+    }
+
+    return String(value);
+  }
+
   function getCallStack() {
     try {
       return new Error().stack || '';
     } catch (_) {
       return '';
     }
+  }
+
+  function findRequestJsonOwners() {
+    const matches = [];
+
+    for (const [key, value] of Object.entries(window)) {
+      if (!value || (typeof value !== 'object' && typeof value !== 'function')) continue;
+
+      try {
+        if (typeof value.__requestJSON === 'function') {
+          matches.push({
+            key,
+            type: typeof value,
+            ownKeys: Object.keys(value).slice(0, 12),
+          });
+        }
+      } catch (_) {}
+    }
+
+    return matches;
+  }
+
+  function buildItemGroupListRequest(pageNum = 1, overrides = {}) {
+    const template =
+      state.itemGroupListRequest ||
+      state.wishlistRequestTemplates['mtop.aliexpress.wishlist.itemgroup.list'];
+
+    if (!template?.data) return null;
+
+    const nextData = {
+      ...template.data,
+      ...overrides,
+      pageNum,
+    };
+
+    return {
+      api: 'mtop.aliexpress.wishlist.itemgroup.list',
+      v: '2.0',
+      type: 'post',
+      dataType: 'originaljson',
+      needLogin: true,
+      data: JSON.stringify(nextData),
+    };
+  }
+
+  function fetchItemGroupPage(pageNum = 1, overrides = {}) {
+    const request = buildItemGroupListRequest(pageNum, overrides);
+    if (!request) {
+      return Promise.reject(new Error('No captured itemgroup.list request template available yet.'));
+    }
+
+    const mtopRequest = window.lib?.mtop?.H5Request;
+    if (typeof mtopRequest !== 'function') {
+      return Promise.reject(new Error('window.lib.mtop.H5Request is not available.'));
+    }
+
+    return new Promise((resolve, reject) => {
+      try {
+        mtopRequest(
+          request,
+          response => resolve(response),
+          error => reject(error)
+        );
+      } catch (error) {
+        reject(error);
+      }
+    });
+  }
+
+  async function fetchAllItemGroupPages(overrides = {}) {
+    if (state.itemGroupListHydrationPromise) {
+      return state.itemGroupListHydrationPromise;
+    }
+
+    const pageSize = getItemGroupListPageSize(overrides);
+    const totalCount = toFiniteOrNull(state.itemGroupListTotalCount);
+    const totalPages = totalCount != null
+      ? Math.max(1, Math.ceil(totalCount / Math.max(pageSize, 1)))
+      : 1;
+
+    state.itemGroupListHydrationPromise = (async () => {
+      let changed = false;
+      const responses = [];
+
+      for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
+        const response = await fetchItemGroupPage(pageNum, overrides);
+        responses.push(response);
+        changed = processFetchedItemGroupListResponse(response) || changed;
+      }
+
+      if (changed) {
+        scheduleSave();
+        scheduleRefresh();
+      }
+
+      return {
+        pageSize,
+        totalCount,
+        totalPages,
+        changed,
+        responses,
+      };
+    })();
+
+    try {
+      return await state.itemGroupListHydrationPromise;
+    } finally {
+      state.itemGroupListHydrationPromise = null;
+    }
+  }
+
+  function processFetchedItemGroupListResponse(response) {
+    if (!response || typeof response !== 'object') return false;
+    return processApiPayload('mtop.aliexpress.wishlist.itemgroup.list', response);
+  }
+
+  function getItemGroupListPageSize(overrides = {}) {
+    return Math.max(
+      1,
+      toFiniteOrNull(
+        firstDefined(
+          overrides?.pageSize,
+          state.itemGroupListRequest?.data?.pageSize,
+          state.wishlistRequestTemplates['mtop.aliexpress.wishlist.itemgroup.list']?.data?.pageSize,
+          CONFIG.itemGroupListFallbackPageSize,
+        )
+      ) || CONFIG.itemGroupListFallbackPageSize
+    );
   }
 
   function extractRequestDataPayload(body) {
@@ -1177,7 +1583,21 @@
 
   function processItemGroupListPayload(json, payload) {
     let changed = false;
+    const totalCount = toFiniteOrNull(payload?.groupTotalCount);
+    if (totalCount != null && totalCount !== state.itemGroupListTotalCount) {
+      state.itemGroupListTotalCount = totalCount;
+      changed = true;
+    }
+
     const seenGroupIds = new Set();
+    const exactEntries = extractExactItemGroupListEntries(payload);
+
+    for (const entry of exactEntries) {
+      if (!entry?.groupId || seenGroupIds.has(entry.groupId)) continue;
+      seenGroupIds.add(entry.groupId);
+      changed = rememberGroupMeta(entry.groupId, entry) || changed;
+    }
+
     const roots = [payload, json?.data, json];
 
     for (const root of roots) {
@@ -1193,6 +1613,21 @@
     }
 
     return changed;
+  }
+
+  function extractExactItemGroupListEntries(payload) {
+    const list = Array.isArray(payload?.groupList)
+      ? payload.groupList
+      : [];
+
+    return list
+      .map(entry => ({
+        groupId: entry?.id != null ? String(entry.id) : '',
+        name: entry?.name || entry?.groupName || '',
+        itemCount: firstDefined(entry?.itemCount, entry?.itemNum, entry?.goodsNum, entry?.itemList?.length),
+        visibility: entry?.isPublic,
+      }))
+      .filter(entry => entry.groupId && cleanText(entry.name));
   }
 
   function rememberGroupMeta(groupId, fields) {
@@ -1725,6 +2160,7 @@
   function queueMoveDialogAutoLoad() {
     if (!CONFIG.autoLoadMoveDialogPages) return;
     if (state.moveDialogAutoLoadRunning || state.moveDialogAutoLoadQueued || state.moveDialogAutoLoadDone) return;
+    if (!shouldFallbackMoveDialogAutoLoad()) return;
 
     const modal = document.querySelector(SELECTORS.modal);
     if (!isMoveDialogVisible(modal) || !isMoveDialogTitleMatch(modal)) return;
@@ -1743,6 +2179,7 @@
   async function loadAllMoveDialogPages() {
     if (!CONFIG.autoLoadMoveDialogPages) return false;
     if (state.moveDialogAutoLoadRunning) return false;
+    if (!shouldFallbackMoveDialogAutoLoad()) return false;
 
     const modal = document.querySelector(SELECTORS.modal);
     if (!isMoveDialogVisible(modal) || !isMoveDialogTitleMatch(modal)) return false;
@@ -1804,6 +2241,12 @@
     const afterHeight = scrollEl.scrollHeight;
 
     return afterCount > beforeCount || afterHeight > beforeHeight;
+  }
+
+  function shouldFallbackMoveDialogAutoLoad() {
+    const totalCount = toFiniteOrNull(state.itemGroupListTotalCount);
+    if (totalCount == null) return true;
+    return totalCount > CONFIG.preferredMoveDialogPageSize;
   }
 
   function renderToolbar() {

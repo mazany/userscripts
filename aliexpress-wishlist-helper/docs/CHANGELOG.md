@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.6.26 - 2026-04-13
+
+- taught the experimental native `itemgroup.list` page-size patch to handle object-shaped request payloads in addition to JSON strings, and expanded its debug output with payload type and keys
+
+## 0.6.25 - 2026-04-13
+
+- added experimental debug helpers for the native `itemgroup.list` page-size patch so the move-dialog hydration branch can report whether the MTop wrapper is installed and what request payload it last adjusted
+
+## 0.6.24 - 2026-04-13
+
+- fixed the experimental native move-dialog page-size patch to reuse the existing wrapped-JSON parser helper when adjusting page-side MTop request payloads before signing
+
+## 0.6.23 - 2026-04-13
+
+- added an experimental native page-side MTop wrapper that increases `itemgroup.list` move-dialog page size to 16 before signing, and limited scroll-based move-dialog auto-load to fallback cases where more than 16 custom lists still exist
+
+## 0.6.22 - 2026-04-13
+
+- fixed the experimental `fetchAllItemGroupPages()` helper to reuse the existing delayed cache writer instead of calling a non-existent save helper
+
+## 0.6.21 - 2026-04-13
+
+- added experimental move-dialog hydration helpers for fetching and processing all captured `itemgroup.list` pages into cache via the page-side H5 MTop client, without changing the visible dialog behavior yet
+
+## 0.6.20 - 2026-04-13
+
+- fixed the experimental move-dialog hydration debug helper to use the page's H5 MTop request path with `type: 'post'` and `dataType: 'originaljson'`, matching the request shape expected by the AliExpress wishlist bundle
+
+## 0.6.19 - 2026-04-13
+
+- added experimental `window.__aeWhDebug.buildItemGroupListRequest()` and `window.__aeWhDebug.fetchItemGroupPage()` helpers on the move-dialog hydration branch to test direct page-side `window.lib.mtop.request(...)` calls for dialog list pagination
+
+## 0.6.18 - 2026-04-13
+
+- added a deeper experimental hook for hidden `__requestJSON` owners and calls on the move-dialog hydration branch so wishlist page bundles can be inspected even when the request helper never escapes to `window`
+
 ## 0.6.17 - 2026-04-13
 
 - added temporary wishlist API tracing on the experimental move-dialog hydration branch, including captured request templates, call stacks, and response previews for wishlist-related fetch/XHR requests
