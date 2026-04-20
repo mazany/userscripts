@@ -11,6 +11,8 @@ This checklist is intended for manual validation after changes to detection, cla
 - [ ] Debug logging appears in DevTools console when `CONFIG.debug = true`.
 - [ ] Override `<style>` element is created.
 - [ ] No obvious page breakage occurs on a generic site.
+- [ ] Browser fixture page opens from `http://localhost`.
+- [ ] Required browser fixture checks pass.
 
 ---
 
@@ -185,6 +187,7 @@ Ensure debugging remains useful after heuristic changes.
 
 ## 12. Final manual review before commit
 
+- [ ] Run `tests/font-override-fixtures.html` over localhost.
 - [ ] Read generated CSS in DevTools.
 - [ ] Confirm only intended selectors are affected.
 - [ ] Confirm only intended variables are affected.

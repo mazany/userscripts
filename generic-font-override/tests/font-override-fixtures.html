@@ -1,0 +1,539 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Generic Font Override Fixtures</title>
+  <style>
+    :root {
+      --fixture-font-sans: "Fixture Sans", system-ui, sans-serif;
+      --fixture-font-serif: "Fixture Serif", Georgia, serif;
+      --fixture-font-alias: var(--fixture-font-mono-root);
+      --fixture-font-mono-root: "Fixture Mono", ui-monospace, monospace;
+      --fixture-font-shorthand: 400 14px/1.5 "Fixture Sans", sans-serif;
+      --fixture-color-token: #c026d3;
+      --fixture-size-token: 14px;
+      --fixture-icon-stack: "Material Icons", sans-serif;
+    }
+
+    body {
+      --fixture-font-mono-body: "Fixture Body Mono", ui-monospace, monospace;
+      margin: 0;
+      color: #202124;
+      background: #f7f8fa;
+      font-family: system-ui, sans-serif;
+    }
+
+    .fixture-shell {
+      width: min(1120px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 28px 0 40px;
+    }
+
+    .fixture-header {
+      display: grid;
+      gap: 8px;
+      margin-bottom: 24px;
+    }
+
+    .fixture-header h1 {
+      margin: 0;
+      font-size: 28px;
+      line-height: 1.15;
+    }
+
+    .fixture-header p {
+      max-width: 760px;
+      margin: 0;
+      color: #5f6368;
+      line-height: 1.45;
+    }
+
+    .summary {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+
+    .summary-item,
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 28px;
+      padding: 0 10px;
+      border: 1px solid #d5d9e2;
+      border-radius: 6px;
+      background: #fff;
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .status-pass {
+      color: #0b6b3a;
+      border-color: #8fd7ae;
+      background: #ecfdf3;
+    }
+
+    .status-fail {
+      color: #9f1239;
+      border-color: #f5a5b8;
+      background: #fff1f3;
+    }
+
+    .status-pending {
+      color: #865200;
+      border-color: #f4cf77;
+      background: #fff8e1;
+    }
+
+    .fixture-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+
+    .fixture-case {
+      min-height: 94px;
+      padding: 14px;
+      border: 1px solid #d9dde6;
+      border-radius: 8px;
+      background: #fff;
+    }
+
+    .fixture-case strong {
+      display: block;
+      margin-bottom: 8px;
+      font-size: 14px;
+    }
+
+    .fixture-case span {
+      color: #5f6368;
+      font-size: 13px;
+      line-height: 1.35;
+    }
+
+    .case-var-sans {
+      font-family: var(--fixture-font-sans);
+    }
+
+    .case-var-body-mono {
+      font-family: var(--fixture-font-mono-body);
+    }
+
+    .case-var-alias-mono {
+      font-family: var(--fixture-font-alias);
+    }
+
+    .case-rule-serif {
+      font-family: "Fixture Direct Serif", Georgia, serif;
+    }
+
+    .case-rule-mono {
+      font-family: "Fixture Direct Mono", ui-monospace, monospace;
+    }
+
+    .case-shorthand {
+      font: var(--fixture-font-shorthand);
+    }
+
+    .case-non-font {
+      color: var(--fixture-color-token);
+      margin-top: var(--fixture-size-token);
+    }
+
+    @font-face {
+      font-family: "Fixture Ambiguous";
+      src: url("/fixtures/fixture-mono-latin.woff2") format("woff2");
+      font-style: normal;
+      font-weight: 400;
+    }
+
+    .case-font-face-mono {
+      font-family: "Fixture Ambiguous", system-ui, sans-serif;
+    }
+
+    @font-face {
+      font-family: "Material Icons";
+      src: url("/fixtures/material-icons.woff2") format("woff2");
+      font-style: normal;
+      font-weight: 400;
+      unicode-range: U+E000-F8FF;
+    }
+
+    @font-face {
+      font-family: "Font Awesome 6 Free";
+      src: url("/fixtures/fa-solid-900.woff2") format("woff2");
+      font-style: normal;
+      font-weight: 900;
+      unicode-range: U+F000-F8FF;
+    }
+
+    .material-icons,
+    .case-icon-material {
+      font-family: "Material Icons", sans-serif;
+      font-weight: normal;
+      font-style: normal;
+      letter-spacing: normal;
+      text-transform: none;
+    }
+
+    .fa,
+    .case-icon-awesome::before {
+      font-family: "Font Awesome 6 Free", sans-serif;
+      font-weight: 900;
+    }
+
+    .case-icon-awesome::before {
+      content: "\f007";
+    }
+
+    .case-icon-variable {
+      font-family: var(--fixture-icon-stack);
+    }
+
+    .result-table {
+      width: 100%;
+      border-collapse: collapse;
+      overflow: hidden;
+      border: 1px solid #d9dde6;
+      border-radius: 8px;
+      background: #fff;
+      font-size: 13px;
+    }
+
+    .result-table th,
+    .result-table td {
+      padding: 10px;
+      border-bottom: 1px solid #e8ebf0;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    .result-table th {
+      color: #394150;
+      background: #eef1f5;
+      font-weight: 700;
+    }
+
+    .result-table tr:last-child td {
+      border-bottom: 0;
+    }
+
+    code {
+      font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+      font-size: 12px;
+    }
+
+    @media (max-width: 720px) {
+      .fixture-shell {
+        width: min(100% - 20px, 1120px);
+        padding-top: 18px;
+      }
+
+      .result-table {
+        display: block;
+        overflow-x: auto;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="fixture-shell">
+    <header class="fixture-header">
+      <h1>Generic Font Override Fixtures</h1>
+      <p>
+        Serve this file over localhost with the userscript enabled. The page checks the injected override CSS and computed styles after the userscript has had time to rescan.
+      </p>
+    </header>
+
+    <section class="summary" id="summary" aria-live="polite">
+      <span class="summary-item">Waiting for userscript...</span>
+    </section>
+
+    <section class="fixture-grid" aria-label="Font override fixtures">
+      <div class="fixture-case case-var-sans" data-probe="var-sans">
+        <strong>Root variable sans</strong>
+        <span>Uses <code>--fixture-font-sans</code>.</span>
+      </div>
+      <div class="fixture-case case-var-body-mono" data-probe="body-mono">
+        <strong>Body scoped mono variable</strong>
+        <span>Uses <code>--fixture-font-mono-body</code>.</span>
+      </div>
+      <div class="fixture-case case-var-alias-mono" data-probe="alias-mono">
+        <strong>Alias to mono variable</strong>
+        <span>Uses <code>--fixture-font-alias</code>.</span>
+      </div>
+      <div class="fixture-case case-rule-serif" data-probe="rule-serif">
+        <strong>Direct serif rule</strong>
+        <span>Uses a direct <code>font-family</code> declaration.</span>
+      </div>
+      <div class="fixture-case case-rule-mono" data-probe="rule-mono">
+        <strong>Direct mono rule</strong>
+        <span>Uses a direct <code>font-family</code> declaration.</span>
+      </div>
+      <div class="fixture-case case-font-face-mono" data-probe="font-face-mono">
+        <strong>@font-face mono signal</strong>
+        <span>Family name is ambiguous, file name contains mono.</span>
+      </div>
+      <div class="fixture-case case-shorthand" data-probe="shorthand">
+        <strong>Shorthand-like value</strong>
+        <span>Must not rewrite the shorthand token.</span>
+      </div>
+      <div class="fixture-case case-non-font" data-probe="non-font">
+        <strong>Non-font tokens</strong>
+        <span>Color and size custom properties must stay untouched.</span>
+      </div>
+      <div class="fixture-case material-icons case-icon-material" data-probe="icon-material" aria-hidden="true">
+        <strong>Material Icons</strong>
+        <span>Planned: icon font stack must be preserved.</span>
+      </div>
+      <div class="fixture-case case-icon-awesome" data-probe="icon-awesome" aria-hidden="true">
+        <strong>Font Awesome pseudo icon</strong>
+        <span>Planned: pseudo-element icon font must be preserved.</span>
+      </div>
+      <div class="fixture-case case-icon-variable" data-probe="icon-variable" aria-hidden="true">
+        <strong>Icon font through variable</strong>
+        <span>Planned: icon variable stack must be preserved.</span>
+      </div>
+    </section>
+
+    <table class="result-table" aria-label="Fixture results">
+      <thead>
+        <tr>
+          <th>Case</th>
+          <th>Expected</th>
+          <th>Actual</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody id="results">
+        <tr>
+          <td colspan="4">Waiting for checks...</td>
+        </tr>
+      </tbody>
+    </table>
+  </main>
+
+  <script>
+    (function () {
+      'use strict';
+
+      const OVERRIDE_STYLE_ID = 'tm-generic-font-override';
+      const CHECK_DELAY_MS = 1800;
+      const MONO_MARKER = 'Maple Mono NF';
+      const SANS_MARKER = 'Google Sans Flex Rounded';
+
+      const TESTS = [
+        {
+          name: 'Root CSS variable is overridden',
+          expected: '--fixture-font-sans resolves to configured sans stack',
+          probe: '[data-probe="var-sans"]',
+          required: true,
+          check: ({ css, computed }) => (
+            css.includes('--fixture-font-sans:') &&
+            computed('[data-probe="var-sans"]').fontFamily.includes(SANS_MARKER)
+          ),
+          actual: ({ css, computed }) => valueSummary(css, computed('[data-probe="var-sans"]').fontFamily, '--fixture-font-sans'),
+        },
+        {
+          name: 'Body-scoped variable is overridden',
+          expected: '--fixture-font-mono-body resolves to configured mono stack',
+          probe: '[data-probe="body-mono"]',
+          required: true,
+          check: ({ css, computed }) => (
+            css.includes('--fixture-font-mono-body:') &&
+            computed('[data-probe="body-mono"]').fontFamily.includes(MONO_MARKER)
+          ),
+          actual: ({ css, computed }) => valueSummary(css, computed('[data-probe="body-mono"]').fontFamily, '--fixture-font-mono-body'),
+        },
+        {
+          name: 'Variable alias resolves to mono',
+          expected: '--fixture-font-alias follows --fixture-font-mono-root',
+          probe: '[data-probe="alias-mono"]',
+          required: true,
+          check: ({ css, computed }) => (
+            css.includes('--fixture-font-alias:') &&
+            computed('[data-probe="alias-mono"]').fontFamily.includes(MONO_MARKER)
+          ),
+          actual: ({ css, computed }) => valueSummary(css, computed('[data-probe="alias-mono"]').fontFamily, '--fixture-font-alias'),
+        },
+        {
+          name: 'Direct mono rule is overridden',
+          expected: '.case-rule-mono uses configured mono stack',
+          probe: '[data-probe="rule-mono"]',
+          required: true,
+          check: ({ css, computed }) => (
+            css.includes('.case-rule-mono') &&
+            computed('[data-probe="rule-mono"]').fontFamily.includes(MONO_MARKER)
+          ),
+          actual: ({ css, computed }) => valueSummary(css, computed('[data-probe="rule-mono"]').fontFamily, '.case-rule-mono'),
+        },
+        {
+          name: 'Direct serif rule is overridden',
+          expected: '.case-rule-serif receives a font-family override',
+          probe: '[data-probe="rule-serif"]',
+          required: true,
+          check: ({ css }) => css.includes('.case-rule-serif') && css.includes('font-family:'),
+          actual: ({ css, computed }) => valueSummary(css, computed('[data-probe="rule-serif"]').fontFamily, '.case-rule-serif'),
+        },
+        {
+          name: '@font-face metadata can classify mono',
+          expected: 'Ambiguous family with mono src uses configured mono stack',
+          probe: '[data-probe="font-face-mono"]',
+          required: true,
+          check: ({ css, computed }) => (
+            css.includes('.case-font-face-mono') &&
+            computed('[data-probe="font-face-mono"]').fontFamily.includes(MONO_MARKER)
+          ),
+          actual: ({ css, computed }) => valueSummary(css, computed('[data-probe="font-face-mono"]').fontFamily, '.case-font-face-mono'),
+        },
+        {
+          name: 'Shorthand-like custom property is skipped',
+          expected: '--fixture-font-shorthand is not emitted into override CSS',
+          probe: '[data-probe="shorthand"]',
+          required: true,
+          check: ({ css }) => !css.includes('--fixture-font-shorthand:'),
+          actual: ({ css }) => css.includes('--fixture-font-shorthand:') ? 'override emitted' : 'no override emitted',
+        },
+        {
+          name: 'Non-font custom properties are skipped',
+          expected: 'Color and size tokens are not emitted into override CSS',
+          probe: '[data-probe="non-font"]',
+          required: true,
+          check: ({ css }) => !css.includes('--fixture-color-token:') && !css.includes('--fixture-size-token:'),
+          actual: ({ css }) => [
+            css.includes('--fixture-color-token:') ? 'color override emitted' : 'color untouched',
+            css.includes('--fixture-size-token:') ? 'size override emitted' : 'size untouched',
+          ].join('; '),
+        },
+        {
+          name: 'Material icon font stack is preserved',
+          expected: 'Planned icon protection: no override for .case-icon-material',
+          probe: '[data-probe="icon-material"]',
+          required: false,
+          check: ({ css, computed }) => (
+            !css.includes('.case-icon-material') &&
+            computed('[data-probe="icon-material"]').fontFamily.includes('Material Icons')
+          ),
+          actual: ({ css, computed }) => valueSummary(css, computed('[data-probe="icon-material"]').fontFamily, '.case-icon-material'),
+        },
+        {
+          name: 'Font Awesome pseudo icon is preserved',
+          expected: 'Planned icon protection: no override for pseudo-element icon rule',
+          probe: '[data-probe="icon-awesome"]',
+          required: false,
+          check: ({ css }) => !css.includes('.case-icon-awesome::before') && !css.includes('.fa'),
+          actual: ({ css }) => [
+            css.includes('.case-icon-awesome::before') ? 'pseudo override emitted' : 'pseudo untouched',
+            css.includes('.fa') ? '.fa override emitted' : '.fa untouched',
+          ].join('; '),
+        },
+        {
+          name: 'Icon font custom property is preserved',
+          expected: 'Planned icon protection: no override for --fixture-icon-stack',
+          probe: '[data-probe="icon-variable"]',
+          required: false,
+          check: ({ css, computed }) => (
+            !css.includes('--fixture-icon-stack:') &&
+            computed('[data-probe="icon-variable"]').fontFamily.includes('Material Icons')
+          ),
+          actual: ({ css, computed }) => valueSummary(css, computed('[data-probe="icon-variable"]').fontFamily, '--fixture-icon-stack'),
+        },
+      ];
+
+      function getOverrideCss() {
+        const styleEl = document.getElementById(OVERRIDE_STYLE_ID);
+        return styleEl ? styleEl.textContent || '' : '';
+      }
+
+      function computed(selector) {
+        const element = document.querySelector(selector);
+        return element ? getComputedStyle(element) : { fontFamily: '' };
+      }
+
+      function valueSummary(css, fontFamily, marker) {
+        const emitted = css.includes(marker) ? 'override emitted' : 'no override emitted';
+        return `${emitted}; computed font-family: ${fontFamily || '(empty)'}`;
+      }
+
+      function runTests() {
+        const context = {
+          css: getOverrideCss(),
+          computed,
+        };
+
+        return TESTS.map(test => {
+          let passed = false;
+          let actual = '';
+
+          try {
+            passed = Boolean(test.check(context));
+            actual = test.actual(context);
+          } catch (error) {
+            actual = error && error.message ? error.message : String(error);
+          }
+
+          return {
+            ...test,
+            passed,
+            actual,
+          };
+        });
+      }
+
+      function render(results) {
+        const required = results.filter(result => result.required);
+        const planned = results.filter(result => !result.required);
+        const requiredPass = required.filter(result => result.passed).length;
+        const requiredFail = required.length - requiredPass;
+        const plannedPass = planned.filter(result => result.passed).length;
+        const plannedFail = planned.length - plannedPass;
+
+        document.getElementById('summary').innerHTML = [
+          pill(`${requiredPass}/${required.length} required passing`, requiredFail ? 'fail' : 'pass'),
+          pill(`${requiredFail} required failing`, requiredFail ? 'fail' : 'pass'),
+          pill(`${plannedPass}/${planned.length} planned passing`, plannedFail ? 'pending' : 'pass'),
+          pill(`${plannedFail} planned pending`, plannedFail ? 'pending' : 'pass'),
+          pill(document.getElementById(OVERRIDE_STYLE_ID) ? 'override style found' : 'override style missing', document.getElementById(OVERRIDE_STYLE_ID) ? 'pass' : 'fail'),
+        ].join('');
+
+        document.getElementById('results').innerHTML = results.map(result => {
+          const status = result.passed
+            ? pill('pass', 'pass')
+            : result.required
+              ? pill('fail', 'fail')
+              : pill('planned', 'pending');
+
+          return `
+            <tr>
+              <td><strong>${escapeHtml(result.name)}</strong><br><code>${escapeHtml(result.probe || '')}</code></td>
+              <td>${escapeHtml(result.expected)}</td>
+              <td>${escapeHtml(result.actual)}</td>
+              <td>${status}</td>
+            </tr>
+          `;
+        }).join('');
+      }
+
+      function pill(text, status) {
+        return `<span class="status-pill status-${status}">${escapeHtml(text)}</span>`;
+      }
+
+      function escapeHtml(value) {
+        return String(value)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#39;');
+      }
+
+      window.addEventListener('load', () => {
+        setTimeout(() => render(runTests()), CHECK_DELAY_MS);
+      });
+    })();
+  </script>
+</body>
+</html>

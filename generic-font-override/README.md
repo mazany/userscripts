@@ -61,6 +61,14 @@ That makes it easy to test broadly, but it also means the script may affect any 
 * More structured test cases across representative websites
 * Internal refactoring for maintainability
 
+## Testing
+
+The repository includes a browser fixture page for manual regression checks:
+
+- `tests/font-override-fixtures.html`
+
+Serve the repository over localhost, open the fixture page, and keep the userscript enabled for localhost. See `docs/TEST_FIXTURES.md` for the full workflow.
+
 ## Status
 
 This is currently a personal experimental userscript. The focus is correctness and safe heuristics rather than maximum override coverage.

@@ -16,6 +16,8 @@ The format is intentionally lightweight and optimized for a small personal proje
 - Debug logging for override and skip decisions.
 - Periodic and SPA-aware rescanning logic.
 - Optional mono-specific tuning rules for code-like elements.
+- Browser fixture page for manual regression checks of font classification and override behavior.
+- Documentation for running the browser fixture page over localhost.
 
 ### Changed
 - Classification logic was refined to prefer value-based heuristics over variable-name-based heuristics.
