@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Generic Browser Font Override
-// @namespace    https://example.com/
+// @namespace    https://userscripts.mazy.cc/
 // @version      0.5.1
 // @description  Safely override font-family in CSS variables and normal CSS rules, with @font-face-aware classification.
 // @match        *://*/*
