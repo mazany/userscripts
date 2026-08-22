@@ -1,0 +1,4 @@
+{
+  "publish": "public",
+  "publishReason": "Serves @updateURL from main for aliexpress-wishlist-helper, so the path and the branch must not move."
+}
